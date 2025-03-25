@@ -15,7 +15,6 @@ import Image from 'next/image'
 type AuthMode = 'signin' | 'forgotPassword'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
-console.log('API URL:', API_URL);
 
 interface BusinessLine {
     id: number;
@@ -32,66 +31,61 @@ export default function AuthPage() {
   const [businessLine, setBusinessLine] = useState("")
   const [businessLines, setBusinessLines] = useState<BusinessLine[]>([])
   const [fetchingBusinessLines, setFetchingBusinessLines] = useState(false)
-  const [shouldFetchBusinessLines, setShouldFetchBusinessLines] = useState(false)
   const router = useRouter()
 
-  // Fetch business lines when the trigger is set
   useEffect(() => {
-    if (!shouldFetchBusinessLines || !userid || userid.trim() === '') {
+    if (!userid || userid.trim() === '') {
       setBusinessLines([]);
       setBusinessLine("");
       return;
     }
-
+  
     const fetchBusinessLines = async () => {
-        setFetchingBusinessLines(true);
-        setError(null);
-        try {
-            const response = await axios.get(`${API_URL}/auth/business-lines`, {
-                params: { username: userid.trim() },
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                }
-            });
-            
-            if (response.data && Array.isArray(response.data)) {
-                setBusinessLines(response.data);
-                
-                if (businessLine && !response.data.some(bl => bl.id.toString() === businessLine)) {
-                    setBusinessLine("");
-                }
-                
-                if (response.data.length === 1) {
-                    setBusinessLine(response.data[0].id.toString());
-                }
-                
-                if (response.data.length === 0) {
-                    setError('No authorized business lines for this user');
-                }
-            } else {
-                setBusinessLines([]);
-                setError('No business lines available');
-            }
-        } catch (err) {
-            console.error('Error fetching business lines:', err);
-            setError('Failed to load business lines');
-            setBusinessLines([]);
-        } finally {
-            setFetchingBusinessLines(false);
-            setShouldFetchBusinessLines(false);
+      setFetchingBusinessLines(true);
+      setError(null);
+      try {
+        const response = await axios.get(`${API_URL}/auth/business-lines`, {
+          params: { username: userid.trim() },
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.data && Array.isArray(response.data)) {
+          setBusinessLines(response.data);
+          
+          // Reset business line if the current selection is no longer valid
+          if (businessLine && !response.data.some(bl => bl.id.toString() === businessLine)) {
+            setBusinessLine("");
+          }
+          
+          // Auto-select if there's only one business line
+          if (response.data.length === 1) {
+            setBusinessLine(response.data[0].id.toString());
+          }
+        } else {
+          setBusinessLines([]);
+          setError('No business lines available');
         }
+      } catch (err) {
+        console.error('Error fetching business lines:', err);
+        setError('Failed to load business lines. Please try again.');
+        setBusinessLines([]);
+      } finally {
+        setFetchingBusinessLines(false);
+      }
     };
-
-    fetchBusinessLines();
-  }, [shouldFetchBusinessLines, userid, businessLine]);
-
-  // Trigger business lines fetch when both username and password are sufficiently long
-  const triggerBusinessLinesFetch = () => {
-    if (userid.trim().length > 3 && password.length > 3) {
-      setShouldFetchBusinessLines(true);
+  
+    // Only fetch if userid has changed and has at least 3 characters
+    if (userid.trim().length >= 3) {
+      const timeoutId = setTimeout(fetchBusinessLines, 500);
+      return () => clearTimeout(timeoutId);
+    } else {
+      setBusinessLines([]);
+      setBusinessLine("");
     }
-  }
+  }, [userid, businessLine]); // Only run when userid or businessLine changes
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -189,10 +183,7 @@ export default function AuthPage() {
                             <Input 
                                 type={showPassword ? "text" : "password"}
                                 value={password}
-                                onChange={(e) => {
-                                    setPassword(e.target.value);
-                                    triggerBusinessLinesFetch();
-                                }}
+                                onChange={(e) => setPassword(e.target.value)}
                                 required 
                                 placeholder="Enter your password"
                                 className="h-11 pr-10 dark:bg-gray-800 dark:text-gray-200"
@@ -217,27 +208,29 @@ export default function AuthPage() {
                             value={businessLine}
                             disabled={isLoading || !userid || fetchingBusinessLines || businessLines.length === 0}
                             name="businessLine"
-                        >
+                            >
                             <SelectTrigger className="h-11">
                                 <SelectValue placeholder={
-                                    !userid || !password ? "Enter UserID and Password" :
-                                    fetchingBusinessLines ? "Loading..." :
-                                    businessLines.length === 0 ? "No business lines available" :
-                                    "Select a Business Line"
+                                fetchingBusinessLines ? "Loading business lines..." :
+                                !userid ? "Enter your UserID first" :
+                                businessLines.length === 0 ? "No business lines available" :
+                                "Select a Business Line"
                                 } />
                             </SelectTrigger>
-                            <SelectContent>
+                            {businessLines.length > 0 && (
+                                <SelectContent>
                                 {businessLines.map((bl) => (
                                     <SelectItem 
-                                        key={bl.id} 
-                                        value={bl.id.toString()}
+                                    key={bl.id} 
+                                    value={bl.id.toString()}
                                     >
-                                        {bl.name}
+                                    {bl.name}
                                     </SelectItem>
                                 ))}
-                            </SelectContent>
-                        </Select>
-                        {userid && password && !fetchingBusinessLines && businessLines.length === 0 && (
+                                </SelectContent>
+                            )}
+                            </Select>
+                        {userid && !fetchingBusinessLines && businessLines.length === 0 && (
                             <p className="text-xs text-muted-foreground mt-1">
                                 No authorized business lines found for this user
                             </p>
