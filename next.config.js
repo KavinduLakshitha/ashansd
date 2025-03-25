@@ -1,7 +1,6 @@
 const path = require('path');
 
 module.exports = {
-  output: 'export',
   webpack: (config) => {
     config.resolve.alias = {
       ...config.resolve.alias,
