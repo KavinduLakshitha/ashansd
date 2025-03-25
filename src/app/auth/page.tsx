@@ -15,6 +15,7 @@ import Image from 'next/image'
 type AuthMode = 'signin' | 'forgotPassword'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL
+console.log('API URL:', API_URL);
 
 interface BusinessLine {
     id: number;
@@ -31,11 +32,12 @@ export default function AuthPage() {
   const [businessLine, setBusinessLine] = useState("")
   const [businessLines, setBusinessLines] = useState<BusinessLine[]>([])
   const [fetchingBusinessLines, setFetchingBusinessLines] = useState(false)
+  const [shouldFetchBusinessLines, setShouldFetchBusinessLines] = useState(false)
   const router = useRouter()
 
-  // Fetch business lines when the userid changes
+  // Fetch business lines when the trigger is set
   useEffect(() => {
-    if (!userid || userid.trim() === '') {
+    if (!shouldFetchBusinessLines || !userid || userid.trim() === '') {
       setBusinessLines([]);
       setBusinessLine("");
       return;
@@ -77,15 +79,19 @@ export default function AuthPage() {
             setBusinessLines([]);
         } finally {
             setFetchingBusinessLines(false);
+            setShouldFetchBusinessLines(false);
         }
     };
 
-    const timeoutId = setTimeout(() => {
-        fetchBusinessLines();
-    }, 500);
+    fetchBusinessLines();
+  }, [shouldFetchBusinessLines, userid, businessLine]);
 
-    return () => clearTimeout(timeoutId);
-  }, [userid, businessLine]);
+  // Trigger business lines fetch when both username and password are sufficiently long
+  const triggerBusinessLinesFetch = () => {
+    if (userid.trim().length > 3 && password.length > 3) {
+      setShouldFetchBusinessLines(true);
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -183,7 +189,10 @@ export default function AuthPage() {
                             <Input 
                                 type={showPassword ? "text" : "password"}
                                 value={password}
-                                onChange={(e) => setPassword(e.target.value)}
+                                onChange={(e) => {
+                                    setPassword(e.target.value);
+                                    triggerBusinessLinesFetch();
+                                }}
                                 required 
                                 placeholder="Enter your password"
                                 className="h-11 pr-10 dark:bg-gray-800 dark:text-gray-200"
@@ -211,7 +220,7 @@ export default function AuthPage() {
                         >
                             <SelectTrigger className="h-11">
                                 <SelectValue placeholder={
-                                    !userid ? "Enter UserID first" :
+                                    !userid || !password ? "Enter UserID and Password" :
                                     fetchingBusinessLines ? "Loading..." :
                                     businessLines.length === 0 ? "No business lines available" :
                                     "Select a Business Line"
@@ -228,7 +237,7 @@ export default function AuthPage() {
                                 ))}
                             </SelectContent>
                         </Select>
-                        {userid && !fetchingBusinessLines && businessLines.length === 0 && (
+                        {userid && password && !fetchingBusinessLines && businessLines.length === 0 && (
                             <p className="text-xs text-muted-foreground mt-1">
                                 No authorized business lines found for this user
                             </p>
