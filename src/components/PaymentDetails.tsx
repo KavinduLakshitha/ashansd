@@ -169,7 +169,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
             amount: creditAmount,
             dueDate
           },
-          sendSMS // Add the sendSMS flag to the API request
+          shouldSendSMS: sendSMS
         },
         {
           headers: {
