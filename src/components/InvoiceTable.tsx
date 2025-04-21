@@ -148,10 +148,10 @@ export default function InvoiceTable({
           })
         );
 
-        toast({
-          title: "Success",
-          description: "Price updated successfully",
-        });
+        // toast({
+        //   title: "Success",
+        //   description: "Price updated successfully",
+        // });
       }
     } catch (error) {
       console.error('Error updating price:', error);

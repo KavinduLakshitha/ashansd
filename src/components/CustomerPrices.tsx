@@ -89,10 +89,10 @@ export default function CustomerPrices() {
         price: parseFloat(editPrice)
       });
       
-      toast({
-        title: "Success",
-        description: "Price updated successfully",
-      });
+      // toast({
+      //   title: "Success",
+      //   description: "Price updated successfully",
+      // });
       
       setEditingId(null);
       fetchPrices();

@@ -52,6 +52,15 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
 
   const isStockIn = pathname.includes('purchase-management');
   const totalPayableAmount = total - (discount || 0);
+
+  const resetForm = () => {
+    setDiscount(0);
+    setCashAmount(0);
+    setCheques([]);
+    setCreditAmount(0);
+    setDueDate(null);
+    setSendSMS(false);
+  };
   
   // Calculate the total number of items and unique items
   const itemsSummary = useMemo(() => {
@@ -124,6 +133,10 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
     setCheques(updatedCheques);
   };
 
+  const handleCancel = () => {
+    resetForm();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
   
@@ -179,6 +192,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
       );
   
       if (response.status === 201) {
+        resetForm();
         onSuccess?.();
       }
     } catch (error: unknown) {
@@ -345,7 +359,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
         </div>
       </CardContent>
       <div className="flex gap-4 justify-end mb-4 mr-4">
-        <Button variant="outline">Cancel</Button>
+        <Button variant="outline" onClick={handleCancel}>Cancel</Button>
         <Button onClick={handleSubmit} disabled={!isPaymentValid}>Submit</Button>
       </div>        
     </Card>

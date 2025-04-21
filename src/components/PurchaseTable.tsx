@@ -34,8 +34,8 @@ const VendorProductsTable: React.FC<VendorProductsTableProps> = ({
   const [products, setProducts] = useState<VendorProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<VendorProduct[]>([]);
-  const [invoiceNumber] = useState<string>('');
-  const [invoiceDate] = useState<Date>(new Date());
+  const [invoiceNumber, setInvoiceNumber] = useState<string>('');
+  const [invoiceDate, setInvoiceDate] = useState<Date>(new Date());
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -130,6 +130,20 @@ const VendorProductsTable: React.FC<VendorProductsTableProps> = ({
     return products.reduce((acc, product) => acc + (product.total || 0), 0);
   };
 
+  const resetForm = () => {
+    setProducts(prevProducts =>
+      prevProducts.map(product => ({
+        ...product,
+        quantity: 0,
+        unitPrice: 0,
+        total: 0
+      }))
+    );
+    
+    setInvoiceNumber('');
+    setInvoiceDate(new Date());
+  };
+
   if (loading) {
     return <div className="text-center p-4">Loading products...</div>;
   }
@@ -190,7 +204,7 @@ const VendorProductsTable: React.FC<VendorProductsTableProps> = ({
           invoiceNumber={invoiceNumber}
           invoiceDate={invoiceDate}
           onSuccess={() => {
-            // Handle success
+            resetForm();
           }}
           onError={(error) => {
             toast({
