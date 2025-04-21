@@ -258,9 +258,15 @@ const UserDialog = ({ open, onClose, user, onSuccess }: UserDialogProps) => {
               </label>
               <Input
                 value={contactNumber}
-                onChange={(e) => setContactNumber(e.target.value)}
-                placeholder="Enter contact number"
-                disabled={isSubmitting}
+                onChange={(e) => {
+                  const value = e.target.value.replace(/\D/g, '');
+                  setContactNumber(value);
+                }}
+                onKeyDown={(e) => {
+                  if (['e', 'E', '+', '-', '.'].includes(e.key)) {
+                    e.preventDefault();
+                  }
+                }}
               />
             </div>
             <div className="space-y-2">

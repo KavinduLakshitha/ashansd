@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Filter, Trash } from "lucide-react";
+import { Edit, Trash } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import UserDialog from "@/components/AddUser";
 import { useToast } from "@/hooks/use-toast";
@@ -112,11 +112,7 @@ export default function UserManagement() {
             placeholder="Search by name or code" 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          <Button variant="outline">
-            <Filter className="mr-2 h-4 w-4" />
-            Filters
-          </Button>
+          />          
           <Button variant="default" onClick={handleDialogOpen}>
             New User
           </Button>

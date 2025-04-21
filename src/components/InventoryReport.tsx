@@ -68,10 +68,10 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
   const [dateOpen, setDateOpen] = useState<boolean>(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [movements, setMovements] = useState<StockMovement[]>([]);
-  const [runningBalance, setRunningBalance] = useState<RunningBalanceResponse | null>(null);
+  const [, setRunningBalance] = useState<RunningBalanceResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [movementLoading, setMovementLoading] = useState<boolean>(false);
-  const [balanceLoading, setBalanceLoading] = useState<boolean>(false);
+  const [, setBalanceLoading] = useState<boolean>(false);
   const [startDate, setStartDate] = useState<Date>(() => {
     const date = new Date();
     date.setDate(date.getDate() - 30);
@@ -642,7 +642,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
         </Tabs>
 
         {/* Running Balance View */}
-        <Tabs defaultValue="running-balance" className="w-full print:hidden">
+        {/* <Tabs defaultValue="running-balance" className="w-full print:hidden">
             <TabsList className="w-full">
             <TabsTrigger value="running-balance">Running Balance</TabsTrigger>
             </TabsList>
@@ -733,7 +733,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                 </CardContent>
             </Card>
             </TabsContent>
-        </Tabs>
+        </Tabs> */}
     </CardContent>
       
     </Card>

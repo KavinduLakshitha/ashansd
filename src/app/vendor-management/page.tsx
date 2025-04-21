@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Filter, Trash } from "lucide-react";
+import { Edit, Trash } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/lib/api/axios";
@@ -94,11 +94,7 @@ export default function VendorManagement() {
             placeholder="Search by vendor name or code" 
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          <Button variant="outline">
-            <Filter className="mr-2 h-4 w-4" />
-            Filters
-          </Button>
+          />          
           <Button variant="default" onClick={() => handleEdit({} as Vendor)}>
             New Vendor
           </Button>

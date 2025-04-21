@@ -243,7 +243,15 @@ const VendorDialog = ({
             </label>
             <Input
               value={contactNumber}
-              onChange={(e) => setContactNumber(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value.replace(/\D/g, '');
+                setContactNumber(value);
+              }}
+              onKeyDown={(e) => {
+                if (['e', 'E', '+', '-', '.'].includes(e.key)) {
+                  e.preventDefault();
+                }
+              }}
               placeholder="Enter contact number"
               disabled={isSubmitting}
             />

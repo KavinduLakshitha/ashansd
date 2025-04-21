@@ -132,8 +132,9 @@ export default function StockAdjustmentPage() {
 
     const updateNewQuantity = (index: number, value: string): void => {
         const updatedItems = [...inventoryItems];
-        updatedItems[index].newQuantity = Number(value);
-        updatedItems[index].adjustedQuantity = Number(value) - updatedItems[index].availableQuantity;
+        const numericValue = value === "" ? "" : Number(value);
+        updatedItems[index].newQuantity = numericValue === "" ? 0 : numericValue;
+        updatedItems[index].adjustedQuantity = (numericValue === "" ? 0 : numericValue) - updatedItems[index].availableQuantity;
         setInventoryItems(updatedItems);
     };
 
@@ -293,13 +294,14 @@ export default function StockAdjustmentPage() {
                                         <TableCell>{item.itemName}</TableCell>
                                         <TableCell>{item.availableQuantity}</TableCell>
                                         <TableCell>
-                                            <Input 
-                                                type="number" 
-                                                value={item.newQuantity}
-                                                onChange={(e) => updateNewQuantity(index, e.target.value)}
-                                                className="w-20"
-                                                min="0"
-                                            />
+                                        <Input 
+                                            type="number" 
+                                            value={item.newQuantity === 0 ? "" : item.newQuantity}
+                                            onChange={(e) => updateNewQuantity(index, e.target.value)}
+                                            className="w-20"
+                                            min="0"
+                                            placeholder="0"
+                                        />
                                         </TableCell>
                                         <TableCell>
                                             <span className={`
