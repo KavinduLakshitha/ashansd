@@ -27,6 +27,12 @@ interface Product {
   Status?: 'Out of Stock' | 'Low Stock' | 'In Stock';
 }
 
+interface MovementDetails {
+  vendor?: string;
+  customer?: string;
+  invoiceNumber?: string;
+}
+
 interface StockMovement {
   MovementID: number;
   ProductID: number;
@@ -39,7 +45,11 @@ interface StockMovement {
   Note?: string;
   CreatedBy: string;
   UnitCost?: number;
-  BatchID?: number;
+  BatchID?: number;  
+  movementType?: 'PURCHASE' | 'SALE' | 'ADJUSTMENT' | 'TRANSFER_IN' | 'TRANSFER_OUT' | 'RETURN';
+  movementLabel?: string;
+  referenceNumber?: string;
+  details?: MovementDetails;
 }
 
 interface RunningBalanceItem extends StockMovement {
@@ -161,13 +171,10 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
     }
   }, [businessLineId, asOfDate]);
 
-  
   useEffect(() => {
     setMovements([]);
     const fetchMovementHistory = async () => {
-      if (!businessLineId || (selectedProduct === 'all' && !startDate && !endDate)) return;
-  
-      console.log('Fetching movement history for endDate:', endDate); // Debugging
+      if (!businessLineId || (selectedProduct === 'all' && !startDate && !endDate)) return;  
   
       setMovementLoading(true);
       setError(null);
@@ -175,7 +182,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
         const queryParams = new URLSearchParams({
           businessLineId: businessLineId.toString(),
           startDate: startDate.toISOString(),
-          endDate: endDate.toISOString() // Ensure this includes the correct time
+          endDate: endDate.toISOString()
         });
   
         if (selectedProduct !== 'all') {
@@ -200,7 +207,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
         }
   
         const data = await response.json() as StockMovement[];
-        console.log('Fetched movements:', data); 
+        console.log("Movements API response:", data);
         setMovements(data);
       } catch (error) {
         console.error('Error fetching movement history:', error);
@@ -263,7 +270,34 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
     alert('Exporting to PDF...');
   };
   
+  // Updated to use the API's movementType or movementLabel directly
   const getMovementTypeLabel = (movement: StockMovement): string => {
+    // First prioritize the movement label from the API
+    if (movement.movementLabel) {
+      return movement.movementLabel;
+    }
+    
+    // Fall back to movement type if available
+    if (movement.movementType) {
+      switch(movement.movementType) {
+        case 'PURCHASE':
+          return 'Purchase';
+        case 'SALE':
+          return 'Sale';
+        case 'ADJUSTMENT':
+          return 'Adjustment';
+        case 'TRANSFER_IN':
+          return 'Transfer In';
+        case 'TRANSFER_OUT':
+          return 'Transfer Out';
+        case 'RETURN':
+          return 'Customer Return';
+        default:
+          return movement.movementType;
+      }
+    }
+    
+    // Legacy fallback if neither is available
     const referencePrefix = movement.ReferenceID?.split('-')[0] || '';
     
     switch(referencePrefix) {
@@ -278,464 +312,390 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
     }
   };
 
+  // Get the appropriate reference/invoice number
+  const getMovementReference = (movement: StockMovement): string => {
+    if (movement.referenceNumber) {
+      return movement.referenceNumber;
+    }
+    return movement.ReferenceID || '-';
+  };
+
   return (
     <Card className="w-full shadow-none rounded-tl-none rounded-tr-none border-0">
-        <CardContent className='mt-3'>
+      <CardContent className='mt-3'>
         {/* Top Controls - Date and Export Options */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 print:hidden">
-            <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
+          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
             <div className="flex flex-col gap-1">
-                <Popover open={dateOpen} onOpenChange={setDateOpen}>
+              <Popover open={dateOpen} onOpenChange={setDateOpen}>
                 <PopoverTrigger asChild>
-                    <Button
+                  <Button
                     variant="outline"
                     className="w-[200px] flex justify-start text-left font-normal"
-                    >                    
+                  >                    
                     {format(asOfDate, 'PPP')}
-                    </Button>
+                  </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-auto p-0">
-                    <Calendar
+                  <Calendar
                     mode="single"
                     selected={asOfDate}
                     onSelect={handleDateSelect}
                     disabled={(date) => date > new Date()}
                     initialFocus
-                    />
+                  />
                 </PopoverContent>
-                </Popover>
+              </Popover>
             </div>
             
             <Button 
-                variant="outline" 
-                size="icon"
-                onClick={() => setAsOfDate(new Date())}
-                title="Refresh data"
+              variant="outline" 
+              size="icon"
+              onClick={() => setAsOfDate(new Date())}
+              title="Refresh data"
             >
-                <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             </Button>
-            </div>
+          </div>
 
-            <div className="flex gap-2">
+          <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={exportToPDF}>
-                <FileDown className="mr-2 h-4 w-4" />
-                PDF
+              <FileDown className="mr-2 h-4 w-4" />
+              PDF
             </Button>                        
-            </div>
+          </div>
         </div>
 
         {error && (
-            <Alert variant="destructive">
+          <Alert variant="destructive">
             <AlertDescription>{error}</AlertDescription>
-            </Alert>
+          </Alert>
         )}
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
+          <Card>
             <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Total Items</CardTitle>
+              <CardTitle className="text-sm font-medium">Total Items</CardTitle>
             </CardHeader>
             <CardContent>
-                <div className="text-2xl font-bold">{totalItems}</div>
-                <p className="text-xs text-muted-foreground">As of {format(asOfDate, 'PPP')}</p>
+              <div className="text-2xl font-bold">{totalItems}</div>
+              <p className="text-xs text-muted-foreground">As of {format(asOfDate, 'PPP')}</p>
             </CardContent>
-            </Card>
-                        
-            <Card>
+          </Card>
+                      
+          <Card>
             <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Low Stock Alert</CardTitle>
+              <CardTitle className="text-sm font-medium">Low Stock Alert</CardTitle>
             </CardHeader>
             <CardContent>
-                <div className="text-2xl font-bold text-amber-500">{lowStockItems}</div>
-                <p className="text-xs text-muted-foreground">Items below minimum quantity</p>
+              <div className="text-2xl font-bold text-amber-500">{lowStockItems}</div>
+              <p className="text-xs text-muted-foreground">Items below minimum quantity</p>
             </CardContent>
-            </Card>
+          </Card>
         </div>
 
         {/* Main Content Tabs */}
         <Tabs defaultValue="current" className="w-full mt-2">
-            <TabsList className="grid w-full grid-cols-2 print:hidden">
+          <TabsList className="grid w-full grid-cols-2 print:hidden">
             <TabsTrigger value="current">Current Inventory</TabsTrigger>
             <TabsTrigger value="history">Movement History</TabsTrigger>
-            </TabsList>
-            
-            {/* Current Inventory Tab */}
-            <TabsContent value="current" className="w-full">
+          </TabsList>
+          
+          {/* Current Inventory Tab */}
+          <TabsContent value="current" className="w-full">
             <Card>
-                <CardHeader>
+              <CardHeader>
                 <CardTitle>Inventory Items</CardTitle>
                 <CardDescription>
-                    Current stock levels as of {format(asOfDate, 'MMMM d, yyyy')}
+                  Current stock levels as of {format(asOfDate, 'MMMM d, yyyy')}
                 </CardDescription>
                 
                 <div className="mt-2 print:hidden">
-                    <Input
+                  <Input
                     placeholder="Search products..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
                     className="max-w-md"
-                    />
+                  />
                 </div>
-                </CardHeader>
-                <CardContent>
+              </CardHeader>
+              <CardContent>
                 {loading ? (
-                    <div className="flex justify-center items-center py-8">
+                  <div className="flex justify-center items-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                    </div>
+                  </div>
                 ) : (
-                    <div className="overflow-x-auto">
+                  <div className="overflow-x-auto">
                     <Table>
-                        <TableHeader>
+                      <TableHeader>
                         <TableRow>
-                            <TableHead>ID</TableHead>
-                            <TableHead>Product</TableHead>
-                            <TableHead className="text-right">Current Qty</TableHead>
-                            <TableHead className="text-right">Min Qty</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="text-right">Value</TableHead>
-                            <TableHead>Last Updated</TableHead>
+                          <TableHead>ID</TableHead>
+                          <TableHead>Product</TableHead>
+                          <TableHead className="text-right">Current Qty</TableHead>
+                          <TableHead className="text-right">Min Qty</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="text-right">Value</TableHead>
+                          <TableHead>Last Updated</TableHead>
                         </TableRow>
-                        </TableHeader>
-                        <TableBody>
+                      </TableHeader>
+                      <TableBody>
                         {filteredProducts.length === 0 ? (
-                            <TableRow>
+                          <TableRow>
                             <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                                No inventory items found
+                              No inventory items found
                             </TableCell>
-                            </TableRow>
+                          </TableRow>
                         ) : (
-                            filteredProducts.map((product) => (
+                          filteredProducts.map((product) => (
                             <TableRow key={product.ProductID}>
-                                <TableCell className="font-mono text-xs">{product.ProductID}</TableCell>
-                                <TableCell className="font-medium">{product.Name}</TableCell>
-                                <TableCell className="text-right">{product.CurrentQTY}</TableCell>
-                                <TableCell className="text-right">{product.MinimumQTY || 0}</TableCell>
-                                <TableCell>
-                                    {product.Status ? (
-                                        <Badge
-                                        variant={product.Status === 'In Stock' ? 'outline' : 'destructive'}
-                                        className={
-                                            product.Status === 'In Stock'
-                                            ? 'bg-green-100 text-green-800 border-green-200'
-                                            : product.Status === 'Low Stock'
-                                                ? 'bg-amber-500'
-                                                : undefined
-                                        }
-                                        >
-                                        {product.Status}
-                                        </Badge>
-                                    ) : (
-                                        product.CurrentQTY === 0 ? (
-                                        <Badge variant="destructive">Out of Stock</Badge>
-                                        ) : product.CurrentQTY < (product.MinimumQTY || 0) ? (
-                                        <Badge variant="destructive" className="bg-amber-500">Low Stock</Badge>
-                                        ) : (
-                                        <Badge variant="outline" className="bg-green-100 text-green-800 border-green-200">In Stock</Badge>
-                                        )
-                                    )}
-                                </TableCell>
-                                <TableCell className="text-right">
+                              <TableCell className="font-mono text-xs">{product.ProductID}</TableCell>
+                              <TableCell className="font-medium">{product.Name}</TableCell>
+                              <TableCell className="text-right">{product.CurrentQTY}</TableCell>
+                              <TableCell className="text-right">{product.MinimumQTY || 0}</TableCell>
+                              <TableCell>
+                                {product.Status ? (
+                                  <Badge
+                                    variant={product.Status === 'In Stock' ? 'outline' : 'destructive'}
+                                    className={
+                                      product.Status === 'In Stock'
+                                        ? 'bg-green-100 text-green-800 border-green-200'
+                                        : product.Status === 'Low Stock'
+                                          ? 'bg-amber-500'
+                                          : undefined
+                                    }
+                                  >
+                                    {product.Status}
+                                  </Badge>
+                                ) : (
+                                  product.CurrentQTY === 0 ? (
+                                    <Badge variant="destructive">Out of Stock</Badge>
+                                  ) : product.CurrentQTY < (product.MinimumQTY || 0) ? (
+                                    <Badge variant="destructive" className="bg-amber-500">Low Stock</Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="bg-green-100 text-green-800 border-green-200">In Stock</Badge>
+                                  )
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right">
                                 {new Intl.NumberFormat('en-US', {
-                                    style: 'currency',
-                                    currency: 'LKR'
+                                  style: 'currency',
+                                  currency: 'LKR'
                                 }).format(product.Value || product.CurrentQTY * (product.AverageCost || 0))}
-                                </TableCell>
-                                <TableCell className="text-sm text-muted-foreground">
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
                                 {product.LastUpdated ? format(new Date(product.LastUpdated), 'MMM d, yyyy') : 'N/A'}
-                                </TableCell>
+                              </TableCell>
                             </TableRow>
-                            ))
+                          ))
                         )}
-                        </TableBody>
+                      </TableBody>
                     </Table>
-                    </div>
+                  </div>
                 )}
-                </CardContent>
-                <CardFooter className="flex justify-between">
+              </CardContent>
+              <CardFooter className="flex justify-between">
                 <div className="text-sm text-muted-foreground">
-                    {filteredProducts.length} of {products.length} items
+                  {filteredProducts.length} of {products.length} items
                 </div>
-                </CardFooter>
+              </CardFooter>
             </Card>
-            </TabsContent>
-            
-            {/* Movement History Tab */}
-            <TabsContent value="history">
+          </TabsContent>
+          
+          {/* Movement History Tab - Updated */}
+          <TabsContent value="history">
             <Card>
-                <CardHeader>
+              <CardHeader>
                 <CardTitle>Inventory Movement History</CardTitle>
                 <CardDescription>
-                    Track all inventory changes including sales, purchases, and adjustments
+                  Track all inventory changes including sales, purchases, and adjustments
                 </CardDescription>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 print:hidden">
-                    {/* Date Range Selectors */}
-                    <div className="flex flex-col gap-1">
+                  {/* Date Range Selectors */}
+                  <div className="flex flex-col gap-1">
                     <span className="text-sm text-gray-500">From Date:</span>
                     <Popover open={startDateOpen} onOpenChange={setStartDateOpen}>
-                        <PopoverTrigger asChild>
+                      <PopoverTrigger asChild>
                         <Button
-                            variant="outline"
-                            className="w-full flex justify-start text-left font-normal"
+                          variant="outline"
+                          className="w-full flex justify-start text-left font-normal"
                         >                            
-                            {startDate ? format(startDate, 'PP') : 'Select date'}
+                          {startDate ? format(startDate, 'PP') : 'Select date'}
                         </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
                         <Calendar
-                            mode="single"
-                            selected={startDate}
-                            onSelect={(date) => {
+                          mode="single"
+                          selected={startDate}
+                          onSelect={(date) => {
                             setStartDate(date || startDate);
                             setStartDateOpen(false);
-                            }}
-                            initialFocus
+                          }}
+                          initialFocus
                         />
-                        </PopoverContent>
+                      </PopoverContent>
                     </Popover>
-                    </div>
-                    
-                    <div className="flex flex-col gap-1">
+                  </div>
+                  
+                  <div className="flex flex-col gap-1">
                     <span className="text-sm text-gray-500">To Date:</span>
                     <Popover open={endDateOpen} onOpenChange={setEndDateOpen}>
-                        <PopoverTrigger asChild>
+                      <PopoverTrigger asChild>
                         <Button
-                            variant="outline"
-                            className="w-full flex justify-start text-left font-normal"
+                          variant="outline"
+                          className="w-full flex justify-start text-left font-normal"
                         >                            
-                            {endDate ? format(endDate, 'PP') : 'Select date'}
+                          {endDate ? format(endDate, 'PP') : 'Select date'}
                         </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0">
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
                         <Calendar
-                            mode="single"
-                            selected={endDate}
-                            onSelect={handleToDateSelect}
-                            disabled={(date) => date > new Date()}
-                            initialFocus
+                          mode="single"
+                          selected={endDate}
+                          onSelect={handleToDateSelect}
+                          disabled={(date) => date > new Date()}
+                          initialFocus
                         />
-                        </PopoverContent>
+                      </PopoverContent>
                     </Popover>
-                    </div>
-                    
-                    {/* Filters */}
-                    <div className="flex flex-col gap-1">
+                  </div>
+                  
+                  {/* Filters */}
+                  <div className="flex flex-col gap-1">
                     <span className="text-sm text-gray-500">Product:</span>
                     <Select
-                        value={selectedProduct}
-                        onValueChange={setSelectedProduct}
+                      value={selectedProduct}
+                      onValueChange={setSelectedProduct}
                     >
-                        <SelectTrigger>
+                      <SelectTrigger>
                         <SelectValue placeholder="All Products" />
-                        </SelectTrigger>
-                        <SelectContent>
+                      </SelectTrigger>
+                      <SelectContent>
                         <SelectItem value="all">All Products</SelectItem>
                         {products.map(product => (
-                            <SelectItem key={product.ProductID} value={product.ProductID.toString()}>
+                          <SelectItem key={product.ProductID} value={product.ProductID.toString()}>
                             {product.Name}
-                            </SelectItem>
+                          </SelectItem>
                         ))}
-                        </SelectContent>
+                      </SelectContent>
                     </Select>
-                    </div>
-                    
-                    <div className="flex flex-col gap-1">
+                  </div>
+                  
+                  <div className="flex flex-col gap-1">
                     <span className="text-sm text-gray-500">Movement Type:</span>
                     <Select
-                        value={movementType}
-                        onValueChange={setMovementType}
+                      value={movementType}
+                      onValueChange={setMovementType}
                     >
-                        <SelectTrigger>
+                      <SelectTrigger>
                         <SelectValue placeholder="All Movements" />
-                        </SelectTrigger>
-                        <SelectContent>
+                      </SelectTrigger>
+                      <SelectContent>
                         <SelectItem value="all">All Movements</SelectItem>
                         <SelectItem value="IN">Stock In</SelectItem>
                         <SelectItem value="OUT">Stock Out</SelectItem>
-                        </SelectContent>
+                      </SelectContent>
                     </Select>
-                    </div>
+                  </div>
                 </div>
-                </CardHeader>
-                <CardContent>
+              </CardHeader>
+              <CardContent>
                 <Alert className="mb-4 print:hidden">
-                    <AlertDescription>
+                  <AlertDescription>
                     Showing inventory movements from {format(startDate, 'PPP')} to {format(endDate, 'PPP')}
-                    </AlertDescription>
+                  </AlertDescription>
                 </Alert>
                 
                 {movementLoading ? (
-                    <div className="flex justify-center items-center py-8">
+                  <div className="flex justify-center items-center py-8">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                    </div>
+                  </div>
                 ) : (
-                    <div className="overflow-x-auto">
+                  <div className="overflow-x-auto">
                     <Table>
-                        <TableHeader>
+                      <TableHeader>
                         <TableRow>
-                            <TableHead>Date & Time</TableHead>
-                            <TableHead>Product</TableHead>
-                            <TableHead>Type</TableHead>
-                            <TableHead>Reference</TableHead>
-                            <TableHead className="text-right">Quantity</TableHead>
-                            <TableHead>Direction</TableHead>
-                            <TableHead>User</TableHead>
-                            <TableHead>Notes</TableHead>
+                          <TableHead>Date & Time</TableHead>
+                          <TableHead>Product</TableHead>
+                          <TableHead>Type</TableHead>
+                          <TableHead>Reference</TableHead>
+                          <TableHead className="text-right">Quantity</TableHead>
+                          <TableHead>Direction</TableHead>
+                          <TableHead>User</TableHead>
+                          <TableHead>Details</TableHead>
                         </TableRow>
-                        </TableHeader>
-                        <TableBody>
+                      </TableHeader>
+                      <TableBody>
                         {movements.length === 0 ? (
-                            <TableRow>
+                          <TableRow>
                             <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
-                                No movement records found for the selected criteria
+                              No movement records found for the selected criteria
                             </TableCell>
-                            </TableRow>
+                          </TableRow>
                         ) : (
-                            movements.map((movement) => {
+                          movements.map((movement) => {
                             const product = products.find(p => p.ProductID === movement.ProductID);
                             return (
-                                <TableRow key={movement.MovementID}>
+                              <TableRow key={movement.MovementID}>
                                 <TableCell>
-                                    {format(new Date(movement.Date), 'MMM d, yyyy')}
-                                    <div className="text-xs text-muted-foreground">
+                                  {format(new Date(movement.Date), 'MMM d, yyyy')}
+                                  <div className="text-xs text-muted-foreground">
                                     {format(new Date(movement.Date), 'h:mm a')}
-                                    </div>
+                                  </div>
                                 </TableCell>
                                 <TableCell className="font-medium">
-                                    {movement.ProductName || product?.Name || `Product ID: ${movement.ProductID}`}
+                                  {movement.ProductName || product?.Name || `Product ID: ${movement.ProductID}`}
                                 </TableCell>
                                 <TableCell>{getMovementTypeLabel(movement)}</TableCell>
                                 <TableCell className="font-mono text-xs">
-                                    {movement.ReferenceID}
+                                  {getMovementReference(movement)}
                                 </TableCell>
                                 <TableCell className="text-right font-medium">
-                                    {movement.Quantity}
+                                  {movement.Quantity}
                                 </TableCell>
                                 <TableCell>
-                                    {movement.Direction === 'IN' ? (
+                                  {movement.Direction === 'IN' ? (
                                     <Badge className="bg-green-100 text-green-800 border-green-200">IN</Badge>
-                                    ) : (
+                                  ) : (
                                     <Badge className="bg-red-100 text-red-800 border-red-200">OUT</Badge>
-                                    )}
+                                  )}
                                 </TableCell>
                                 <TableCell>{movement.CreatedBy}</TableCell>
-                                <TableCell className="max-w-xs truncate">
-                                    {movement.Note || '-'}
+                                <TableCell className="max-w-xs">
+                                  {movement.details?.vendor && (
+                                    <div className="text-xs">Vendor: {movement.details.vendor}</div>
+                                  )}
+                                  {movement.details?.customer && (
+                                    <div className="text-xs">Customer: {movement.details.customer}</div>
+                                  )}
+                                  {movement.details?.invoiceNumber && (
+                                    <div className="text-xs">Invoice: {movement.details.invoiceNumber}</div>
+                                  )}
+                                  {movement.Note && (
+                                    <div className="text-xs truncate">{movement.Note}</div>
+                                  )}
+                                  {!movement.details?.vendor && !movement.details?.customer && 
+                                   !movement.details?.invoiceNumber && !movement.Note && '-'}
                                 </TableCell>
-                                </TableRow>
+                              </TableRow>
                             );
-                            })
+                          })
                         )}
-                        </TableBody>
+                      </TableBody>
                     </Table>
-                    </div>
+                  </div>
                 )}
-                </CardContent>
-                <CardFooter>
+              </CardContent>
+              <CardFooter>
                 <div className="text-sm text-muted-foreground">
-                    {movements.length} movements found
+                  {movements.length} movements found
                 </div>
-                </CardFooter>
+              </CardFooter>
             </Card>
-            </TabsContent>
-        </Tabs>
-
-        {/* Running Balance View */}
-        {/* <Tabs defaultValue="running-balance" className="w-full print:hidden">
-            <TabsList className="w-full">
-            <TabsTrigger value="running-balance">Running Balance</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="running-balance">
-            <Card>
-                <CardHeader>
-                <CardTitle>Product Balance History</CardTitle>
-                <CardDescription>
-                    Track how product quantities change over time with running balance
-                </CardDescription>
-                </CardHeader>
-                <CardContent>
-                {selectedProduct === 'all' ? (
-                    <Alert>
-                    <AlertDescription>
-                        Please select a specific product to view running balance history
-                    </AlertDescription>
-                    </Alert>
-                ) : balanceLoading ? (
-                    <div className="flex justify-center items-center py-8">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-                    </div>
-                ) : runningBalance ? (
-                    <div className="overflow-x-auto">
-                    <div className="mb-4 p-4 bg-gray-50 rounded-md">
-                        <p className="font-medium">Initial Balance: {runningBalance.initialBalance}</p>
-                        <p className="font-medium mt-1">Final Balance: {runningBalance.finalBalance}</p>
-                    </div>
-                    
-                    <Table>
-                        <TableHeader>
-                        <TableRow>
-                            <TableHead>Date</TableHead>
-                            <TableHead>Reference</TableHead>
-                            <TableHead>Type</TableHead>
-                            <TableHead className="text-right">Starting</TableHead>
-                            <TableHead className="text-right">IN</TableHead>
-                            <TableHead className="text-right">OUT</TableHead>
-                            <TableHead className="text-right font-medium">Ending</TableHead>
-                        </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                        {runningBalance.movements.length === 0 ? (
-                            <TableRow>
-                            <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
-                                No movement records found for the selected product
-                            </TableCell>
-                            </TableRow>
-                        ) : (
-                            runningBalance.movements.map((movement) => {
-                            const inQty = movement.Direction === 'IN' ? movement.Quantity : 0;
-                            const outQty = movement.Direction === 'OUT' ? movement.Quantity : 0;
-                            
-                            return (
-                                <TableRow key={movement.MovementID}>
-                                <TableCell>
-                                    {format(new Date(movement.Date), 'MMM d, yyyy')}
-                                </TableCell>
-                                <TableCell className="font-mono text-xs">
-                                    {movement.ReferenceID}
-                                </TableCell>
-                                <TableCell>{getMovementTypeLabel(movement)}</TableCell>
-                                <TableCell className="text-right">
-                                    {movement.BalanceBefore}
-                                </TableCell>
-                                <TableCell className="text-right text-green-600">
-                                    {inQty > 0 ? `+${inQty}` : ''}
-                                </TableCell>
-                                <TableCell className="text-right text-red-600">
-                                    {outQty > 0 ? `-${outQty}` : ''}
-                                </TableCell>
-                                <TableCell className="text-right font-medium">
-                                    {movement.BalanceAfter}
-                                </TableCell>
-                                </TableRow>
-                            );
-                            })
-                        )}
-                        </TableBody>
-                    </Table>
-                    </div>
-                ) : (
-                    <div className="py-4 text-center text-muted-foreground">
-                    Select a product and date range to view running balance
-                    </div>
-                )}
-                </CardContent>
-            </Card>
-            </TabsContent>
-        </Tabs> */}
-    </CardContent>
-      
+          </TabsContent>
+        </Tabs>        
+      </CardContent>
     </Card>
   );
 };
