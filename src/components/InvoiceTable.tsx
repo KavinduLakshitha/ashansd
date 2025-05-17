@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import PaymentDetails from "./PaymentDetails";
 import axios from '@/lib/api/axios';
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/app/auth/auth-context";
 
 interface Product {
   ProductID: number;
@@ -14,6 +15,7 @@ interface Product {
   Price: number | null;
   PriceListID?: number;
   BusinessLineName: string;
+  BusinessLineID: number;
 }
 
 interface InvoiceTableProps {
@@ -32,6 +34,7 @@ interface InvoiceRow {
   unitPrice: number;
   total: number;
   PriceListID?: number;
+  uniqueId: string;
 }
 
 export default function InvoiceTable({
@@ -41,6 +44,7 @@ export default function InvoiceTable({
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const { getBusinessLineID } = useAuth(); // Use auth context to get business line ID
 
   const validItems = rows
   .filter(row => row.quantity > 0)
@@ -67,22 +71,40 @@ export default function InvoiceTable({
           throw new Error('No authentication token found');
         }
 
+        // Get the business line ID from auth context
+        const businessLineId = getBusinessLineID();
+
+        if (!businessLineId) {
+          throw new Error('Business line ID not found');
+        }
+
+        console.log(`Fetching products for customer ${customerId} and business line ${businessLineId}`);
+
+        // Include businessLineId as a query parameter
         const response = await axios.get(
           `${process.env.NEXT_PUBLIC_API_URL}/pricelist/customer/${customerId}`,
           {
+            params: {
+              businessLineId: businessLineId
+            },
             headers: {
               'Authorization': `Bearer ${token}`
             }
           }
         );
 
-        const transformedRows = response.data.map((product: Product) => ({
+        console.log('Product data received:', response.data);
+
+        // Transform the data with a unique ID for each row
+        const transformedRows = response.data.map((product: Product, index: number) => ({
           ProductID: product.ProductID,
           ProductName: product.ProductName,
           quantity: 0,
           unitPrice: product.Price || 0,
           total: 0,
-          PriceListID: product.PriceListID
+          PriceListID: product.PriceListID,
+          // Create a unique ID using multiple properties and index for extra uniqueness
+          uniqueId: `${product.ProductID}-${product.PriceListID || 'noprice'}-${index}-${Date.now()}`
         }));
 
         setRows(transformedRows);
@@ -99,7 +121,7 @@ export default function InvoiceTable({
     };
 
     fetchCustomerPrices();
-  }, [customerId, toast]);
+  }, [customerId, toast, getBusinessLineID]);
 
   const handleQuantityChange = (productId: number, value: string) => {
     const quantity = Math.max(0, parseFloat(value) || 0);
@@ -147,11 +169,6 @@ export default function InvoiceTable({
             return row;
           })
         );
-
-        // toast({
-        //   title: "Success",
-        //   description: "Price updated successfully",
-        // });
       }
     } catch (error) {
       console.error('Error updating price:', error);
@@ -187,7 +204,7 @@ export default function InvoiceTable({
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.ProductID} className="border-b">
+              <TableRow key={row.uniqueId} className="border-b">
                 <TableCell>{row.ProductName}</TableCell>
                 <TableCell>
                   <Input

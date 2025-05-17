@@ -34,58 +34,54 @@ export default function AuthPage() {
   const router = useRouter()
 
   useEffect(() => {
-    if (!userid || userid.trim() === '') {
-      setBusinessLines([]);
-      setBusinessLine("");
-      return;
+    if (!userid || userid.trim().length < 3) {
+        setBusinessLines([]);
+        setBusinessLine("");
+        return;
     }
-  
+    
     const fetchBusinessLines = async () => {
-      setFetchingBusinessLines(true);
-      setError(null);
-      try {
+        setFetchingBusinessLines(true);
+        setError(null);
+        try {
         const response = await axios.get(`${API_URL}/auth/business-lines`, {
-          params: { username: userid.trim() },
-          headers: {
+            params: { username: userid.trim() },
+            headers: {
             'Accept': 'application/json',
             'Content-Type': 'application/json'
-          }
+            }
         });
+
         
         if (response.data && Array.isArray(response.data)) {
-          setBusinessLines(response.data);
-          
-          // Reset business line if the current selection is no longer valid
-          if (businessLine && !response.data.some(bl => bl.id.toString() === businessLine)) {
-            setBusinessLine("");
-          }
-          
-          // Auto-select if there's only one business line
-          if (response.data.length === 1) {
+            setBusinessLines(response.data);
+            
+            // Auto-select if there's only one business line
+            if (response.data.length === 1) {
             setBusinessLine(response.data[0].id.toString());
-          }
+            } 
+            // Reset business line if the current selection is no longer valid
+            else if (businessLine && !response.data.some(bl => bl.id.toString() === businessLine)) {
+            setBusinessLine("");
+            }
         } else {
-          setBusinessLines([]);
-          setError('No business lines available');
+            setBusinessLines([]);
+            // Don't show error when there are simply no business lines
+            if (userid.trim().length >= 3) {
+            setBusinessLine("");
+            }
         }
-      } catch (err) {
+        } catch (err) {
         console.error('Error fetching business lines:', err);
-        setError('Failed to load business lines. Please try again.');
         setBusinessLines([]);
-      } finally {
+        } finally {
         setFetchingBusinessLines(false);
-      }
+        }
     };
-  
-    // Only fetch if userid has changed and has at least 3 characters
-    if (userid.trim().length >= 3) {
-      const timeoutId = setTimeout(fetchBusinessLines, 500);
-      return () => clearTimeout(timeoutId);
-    } else {
-      setBusinessLines([]);
-      setBusinessLine("");
-    }
-  }, [userid, businessLine]); // Only run when userid or businessLine changes
+
+    const timeoutId = setTimeout(fetchBusinessLines, 800);
+    return () => clearTimeout(timeoutId);
+    }, [userid]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -202,40 +198,40 @@ export default function AuthPage() {
                     </div>
 
                     <div className="space-y-2">
-                        <Label className="text-sm font-medium dark:text-gray-300">Business Line</Label>
-                        <Select 
-                            onValueChange={setBusinessLine} 
-                            value={businessLine}
-                            disabled={isLoading || !userid || fetchingBusinessLines || businessLines.length === 0}
-                            name="businessLine"
+                            <Label className="text-sm font-medium dark:text-gray-300">Business Line</Label>
+                            <Select 
+                                onValueChange={setBusinessLine} 
+                                value={businessLine}
+                                disabled={isLoading || !userid || userid.trim().length < 3 || fetchingBusinessLines}
+                                name="businessLine"
                             >
-                            <SelectTrigger className="h-11">
-                                <SelectValue placeholder={
-                                fetchingBusinessLines ? "Loading business lines..." :
-                                !userid ? "Enter your UserID first" :
-                                businessLines.length === 0 ? "No business lines available" :
-                                "Select a Business Line"
-                                } />
-                            </SelectTrigger>
-                            {businessLines.length > 0 && (
-                                <SelectContent>
-                                {businessLines.map((bl) => (
-                                    <SelectItem 
-                                    key={bl.id} 
-                                    value={bl.id.toString()}
-                                    >
-                                    {bl.name}
-                                    </SelectItem>
-                                ))}
-                                </SelectContent>
-                            )}
+                                <SelectTrigger className="h-11">
+                                    <SelectValue placeholder={
+                                        fetchingBusinessLines ? "Loading business lines..." :
+                                        !userid || userid.trim().length < 3 ? "Enter at least 3 characters" :
+                                        businessLines.length === 0 ? "No business lines available" :
+                                        "Select a Business Line"
+                                    } />
+                                </SelectTrigger>
+                                {businessLines.length > 0 && (
+                                    <SelectContent>
+                                        {businessLines.map((bl) => (
+                                            <SelectItem 
+                                                key={bl.id} 
+                                                value={bl.id.toString()}
+                                            >
+                                                {bl.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                )}
                             </Select>
-                        {userid && !fetchingBusinessLines && businessLines.length === 0 && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                                No authorized business lines found for this user
-                            </p>
-                        )}
-                    </div>
+                            {userid && userid.trim().length >= 3 && !fetchingBusinessLines && businessLines.length === 0 && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    No authorized business lines found for this user
+                                </p>
+                            )}
+                        </div>
 
                     <Button 
                         type="submit" 

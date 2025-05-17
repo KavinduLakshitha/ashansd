@@ -64,7 +64,18 @@ export default function BusinessLineManagement() {
   const handleDelete = async (id: number) => {
     if (confirm("Are you sure you want to delete this business line?")) {
       try {
-        await api.delete(`/business-lines/${id}`);
+        const response = await api.delete(`/business-lines/${id}`);
+        
+        // Check if the response indicates dependencies
+        if (response.data.hasDependencies) {
+          toast({
+            title: "Cannot Delete",
+            description: response.data.message,
+            variant: "destructive",
+          });
+          return;
+        }
+        
         toast({
           title: "Success",
           description: "Business line deleted successfully",
@@ -72,9 +83,15 @@ export default function BusinessLineManagement() {
         fetchBusinessLines();
       } catch (error) {
         console.error('Error deleting business line:', error);
+        // For other types of errors
+        let errorMessage = "Failed to delete business line";
+        if (error && typeof error === "object" && "response" in error) {
+          const err = error as { response?: { data?: { message?: string } } };
+          errorMessage = err.response?.data?.message || errorMessage;
+        }
         toast({
           title: "Error",
-          description: "Failed to delete business line",
+          description: errorMessage,
           variant: "destructive",
         });
       }
