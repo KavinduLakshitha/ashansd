@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import PaymentDetails from "./PaymentDetails";
 import axios from '@/lib/api/axios';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/auth/auth-context";
+import { debounce } from 'lodash';
 
 interface Product {
   ProductID: number;
@@ -37,6 +38,77 @@ interface InvoiceRow {
   uniqueId: string;
 }
 
+// Memoized Input Component for better performance
+const NumberInput = memo(({ 
+  value, 
+  onChange, 
+  onBlur = undefined,
+  placeholder = "0",
+  min = "0"
+}: {
+  value: number;
+  onChange: (value: string) => void;
+  onBlur?: (value: string) => void;
+  placeholder?: string;
+  min?: string;
+}) => {
+  const [localValue, setLocalValue] = useState(value.toString());
+
+  // Update local value when prop value changes
+  useEffect(() => {
+    setLocalValue(value.toString());
+  }, [value]);
+
+  return (
+    <Input
+      type="number"
+      value={localValue}
+      onChange={(e) => {
+        setLocalValue(e.target.value);
+        onChange(e.target.value);
+      }}
+      onBlur={onBlur ? (e) => onBlur(e.target.value) : undefined}
+      placeholder={placeholder}
+      min={min}
+    />
+  );
+});
+
+// Memoized Table Row Component
+const InvoiceTableRow = memo(({ 
+  row, 
+  onQuantityChange, 
+  onUnitPriceChange, 
+  onUnitPriceBlur
+}: {
+  row: InvoiceRow;
+  onQuantityChange: (productId: number, value: string) => void;
+  onUnitPriceChange: (productId: number, value: string) => void;
+  onUnitPriceBlur: (productId: number, value: string) => void;
+}) => {
+  return (
+    <TableRow className="border-b">
+      <TableCell>{row.ProductName}</TableCell>
+      <TableCell>
+        <NumberInput
+          value={row.quantity}
+          onChange={(value) => onQuantityChange(row.ProductID, value)}
+        />
+      </TableCell>
+      <TableCell>
+        <NumberInput
+          value={row.unitPrice}
+          onChange={(value) => onUnitPriceChange(row.ProductID, value)}
+          onBlur={(value) => onUnitPriceBlur(row.ProductID, value)}
+        />
+      </TableCell>
+      <TableCell className="font-medium">
+        Rs. {row.total.toFixed(2)}
+      </TableCell>
+    </TableRow>
+  );
+});
+
 export default function InvoiceTable({
   customerId,
   salesPersonId,
@@ -46,15 +118,48 @@ export default function InvoiceTable({
   const { toast } = useToast();
   const { getBusinessLineID } = useAuth();
 
+  // Create memoized valid items list
   const validItems = rows
-  .filter(row => row.quantity > 0)
-  .map(row => ({
-    ProductID: row.ProductID,
-    item: row.ProductName,
-    quantity: row.quantity,
-    unitPrice: row.unitPrice,
-    total: row.total
-  }));
+    .filter(row => row.quantity > 0)
+    .map(row => ({
+      ProductID: row.ProductID,
+      item: row.ProductName,
+      quantity: row.quantity,
+      unitPrice: row.unitPrice,
+      total: row.total
+    }));
+
+  // Create debounced API call for price updates
+  const debouncedPriceUpdate = useCallback(
+    debounce(async (productId: number, unitPrice: number, customerId?: number) => {
+      if (!customerId) return;
+      
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) {
+          throw new Error('No authentication token found');
+        }
+        
+        await axios.put(
+          `${process.env.NEXT_PUBLIC_API_URL}/pricelist/customer/${customerId}/product/${productId}`,
+          { price: unitPrice },
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error updating price:', error);
+        toast({
+          title: "Error",
+          description: "Failed to update price",
+          variant: "destructive",
+        });
+      }
+    }, 800),
+    [toast]
+  );
 
   useEffect(() => {
     const fetchCustomerPrices = async () => {
@@ -123,7 +228,8 @@ export default function InvoiceTable({
     fetchCustomerPrices();
   }, [customerId, toast, getBusinessLineID]);
 
-  const handleQuantityChange = (productId: number, value: string) => {
+  // Handle quantity change - update UI immediately
+  const handleQuantityChange = useCallback((productId: number, value: string) => {
     const quantity = Math.max(0, parseFloat(value) || 0);
     
     setRows(prevRows => 
@@ -138,51 +244,39 @@ export default function InvoiceTable({
         return row;
       })
     );
-  };
+  }, []);
 
-  const handleUnitPriceChange = async (productId: number, value: string) => {
+  // Handle unit price change in the UI (doesn't trigger API call)
+  const handleUnitPriceChange = useCallback((productId: number, value: string) => {
     const unitPrice = Math.max(0, parseFloat(value) || 0);
     
-    try {
-      if (customerId) {
-        const token = localStorage.getItem('token');
-        
-        await axios.put(
-          `${process.env.NEXT_PUBLIC_API_URL}/pricelist/customer/${customerId}/product/${productId}`,
-          { price: unitPrice },
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          }
-        );
+    setRows(prevRows => 
+      prevRows.map(row => {
+        if (row.ProductID === productId) {
+          return {
+            ...row,
+            unitPrice,
+            total: row.quantity * unitPrice
+          };
+        }
+        return row;
+      })
+    );
+  }, []);
 
-        setRows(prevRows => 
-          prevRows.map(row => {
-            if (row.ProductID === productId) {
-              return {
-                ...row,
-                unitPrice,
-                total: row.quantity * unitPrice
-              };
-            }
-            return row;
-          })
-        );
-      }
-    } catch (error) {
-      console.error('Error updating price:', error);
-      toast({
-        title: "Error",
-        description: "Failed to update price",
-        variant: "destructive",
-      });
+  // Handle unit price blur - update API when user finishes typing
+  const handleUnitPriceBlur = useCallback((productId: number, value: string) => {
+    const unitPrice = Math.max(0, parseFloat(value) || 0);
+    
+    if (customerId) {
+      debouncedPriceUpdate(productId, unitPrice, customerId);
     }
-  };
+  }, [customerId, debouncedPriceUpdate]);
 
-  const getTotalAmount = () => {
+  // Calculate total in a memoized function
+  const getTotalAmount = useCallback(() => {
     return rows.reduce((total, row) => total + row.total, 0);
-  };
+  }, [rows]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center h-full">
@@ -204,36 +298,19 @@ export default function InvoiceTable({
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.uniqueId} className="border-b">
-                <TableCell>{row.ProductName}</TableCell>
-                <TableCell>
-                  <Input
-                    type="number"
-                    value={row.quantity}
-                    onChange={(e) => handleQuantityChange(row.ProductID, e.target.value)}
-                    placeholder="0"
-                    min="0"
-                  />
-                </TableCell>
-                <TableCell>
-                  <Input
-                    type="number"
-                    value={row.unitPrice}
-                    onChange={(e) => handleUnitPriceChange(row.ProductID, e.target.value)}
-                    placeholder="0"
-                    min="0"
-                  />
-                </TableCell>
-                <TableCell className="font-medium">
-                  Rs. {row.total.toFixed(2)}
-                </TableCell>
-              </TableRow>
+              <InvoiceTableRow 
+                key={row.uniqueId}
+                row={row}
+                onQuantityChange={handleQuantityChange}
+                onUnitPriceChange={handleUnitPriceChange}
+                onUnitPriceBlur={handleUnitPriceBlur}
+              />
             ))}
           </TableBody>
         </Table>
       </div>
       <div className="overflow-auto flex-1">
-      <PaymentDetails
+        <PaymentDetails
           total={getTotalAmount()}
           items={validItems}
           customerID={customerId}

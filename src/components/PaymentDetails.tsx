@@ -176,6 +176,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
           salesPersonID,
           products: items,
           date: new Date(),
+          discount: discount,
           cashAmount,
           chequePayments,
           creditPayment: {
