@@ -81,7 +81,7 @@ export default function AuthPage() {
 
     const timeoutId = setTimeout(fetchBusinessLines, 800);
     return () => clearTimeout(timeoutId);
-    }, [userid]);
+    }, [userid, businessLine]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

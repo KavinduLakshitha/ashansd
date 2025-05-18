@@ -5,11 +5,21 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Trash } from "lucide-react";
+import { Edit, Trash, Loader2 } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/lib/api/axios";
+import { AxiosError } from "axios";
 import VendorDialog from "@/components/AddVendor";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle
+} from "@/components/ui/alert-dialog";
 
 interface Vendor {
   VendorID: number;
@@ -21,26 +31,51 @@ interface Vendor {
   BusinessLines: string[];
 }
 
+interface DependencyReference {
+  table: string;
+  displayName: string;
+  count: number;
+  hasReferences: boolean;
+  details: unknown[];
+}
+
+interface DeleteStatus {
+  vendorId: number;
+  vendorName: string;
+  canDelete: boolean;
+  hasDependencies: boolean;
+  totalReferences: number;
+  references: DependencyReference[];
+}
+
 export default function VendorManagement() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
+  
+  const [vendorToDelete, setVendorToDelete] = useState<DeleteStatus | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchVendors = useCallback(async () => {
     try {
       const response = await api.get('/vendors');
       setVendors(response.data);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching vendors:', error);
+      
+      const axiosError = error as AxiosError<{ message: string }>;
+      const errorMessage = axiosError.response?.data?.message || "Failed to fetch vendors";
+      
       toast({
         title: "Error",
-        description: "Failed to fetch vendors",
+        description: errorMessage,
         variant: "destructive",
       });
     }
   }, [toast]);
+  
   useEffect(() => {
     fetchVendors();
   }, [fetchVendors]);
@@ -55,24 +90,64 @@ export default function VendorManagement() {
     fetchVendors();
   };
 
-  const handleDelete = async (id: number) => {
-    if (confirm("Are you sure you want to delete this vendor?")) {
-      try {
-        await api.delete(`/vendors/${id}`);
-        toast({
-          title: "Success",
-          description: "Vendor deleted successfully",
-        });
-        fetchVendors();
-      } catch (error) {
+  const initiateDelete = async (id: number) => {
+    try {
+      const response = await api.get(`/vendors/${id}/can-delete`);
+      setVendorToDelete(response.data);
+    } catch (error: unknown) {
+      console.error('Error checking vendor delete status:', error);
+      
+      const axiosError = error as AxiosError<{ message: string }>;
+      const errorMessage = axiosError.response?.data?.message || "Failed to check if vendor can be deleted";
+      
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const confirmDelete = async (cascade: boolean = false) => {
+    if (!vendorToDelete) return;
+    
+    setIsDeleting(true);
+    
+    try {
+      const endpoint = cascade 
+        ? `/vendors/${vendorToDelete.vendorId}?cascade=true` 
+        : `/vendors/${vendorToDelete.vendorId}`;
+        
+      await api.delete(endpoint);
+      
+      toast({
+        title: "Success",
+        description: cascade 
+          ? "Vendor and all associated records deleted successfully" 
+          : "Vendor deleted successfully",
+      });
+      
+      fetchVendors();
+      
+      setVendorToDelete(null);
+    } catch (error: unknown) {
         console.error('Error deleting vendor:', error);
+        
+        const axiosError = error as AxiosError<{ message: string }>;
+        const errorMessage = axiosError.response?.data?.message || "Failed to delete vendor";
+        
         toast({
           title: "Error",
-          description: "Failed to delete vendor",
+          description: errorMessage,
           variant: "destructive",
         });
-      }
+      } finally {
+      setIsDeleting(false);
     }
+  };
+
+  const cancelDelete = () => {
+    setVendorToDelete(null);
   };
 
   const generateVendorCode = (id: number) => {
@@ -138,7 +213,7 @@ export default function VendorManagement() {
                       <Button 
                         variant="outline" 
                         size="icon"
-                        onClick={() => handleDelete(vendor.VendorID)}
+                        onClick={() => initiateDelete(vendor.VendorID)}
                       >
                         <Trash className="h-4 w-4 text-red-500" />
                       </Button>
@@ -150,12 +225,86 @@ export default function VendorManagement() {
           </Table>
         </div>
       </CardContent>
+      
+      {/* Edit Vendor Dialog */}
       <VendorDialog 
         open={selectedVendor !== null}
         onClose={handleDialogClose}
         vendorId={selectedVendor?.VendorID}
         initialData={selectedVendor || undefined}
       />
+      
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!vendorToDelete} onOpenChange={open => !open && cancelDelete()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {vendorToDelete?.hasDependencies 
+                ? "Cascade Delete Warning" 
+                : "Confirm Deletion"}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {vendorToDelete?.hasDependencies ? (
+                <div>
+                  <div className="mb-3">
+                    You&apos;re about to delete <strong>{vendorToDelete.vendorName}</strong>, which has the following dependencies:
+                  </div>
+                  <ul className="list-disc pl-5 mb-3">
+                    {vendorToDelete.references
+                      .filter(ref => ref.count > 0)
+                      .map((dep, index) => (
+                        <li key={index}>
+                          <span className="font-medium">{dep.count}</span> {dep.displayName}
+                        </li>
+                      ))}
+                  </ul>
+                  <div className="text-amber-500 font-semibold">
+                    Deleting this vendor will also delete all these related records. This action cannot be undone.
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  Are you sure you want to delete <strong>{vendorToDelete?.vendorName}</strong>? This action cannot be undone.
+                </div>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            {vendorToDelete?.hasDependencies ? (
+              <Button 
+                variant="destructive" 
+                onClick={() => confirmDelete(true)}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete All"
+                )}
+              </Button>
+            ) : (
+              <Button 
+                variant="destructive" 
+                onClick={() => confirmDelete(false)}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

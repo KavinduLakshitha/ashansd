@@ -3,13 +3,23 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Trash, Plus } from "lucide-react";
+import { Edit, Trash, Plus, AlertTriangle } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/auth/auth-context";
 import { isAxiosError } from "axios";
 import axiosInstance from "@/lib/api/axios";
 import { Input } from "@/components/ui/input";
 import ProductDialog from "./AddItem";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Product {
   ProductID: number;
@@ -28,6 +38,12 @@ const ProductsInventory: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | undefined>(undefined);
+  
+  // State for delete confirmation dialog
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
+  const [productToDelete, setProductToDelete] = useState<number | null>(null);
+  const [deleteDialogMessage, setDeleteDialogMessage] = useState<string>("");
+  const [deleteDialogSeverity, setDeleteDialogSeverity] = useState<"warning" | "danger">("warning");
 
   // Filter products when search query or products change
   useEffect(() => {
@@ -72,6 +88,12 @@ const ProductsInventory: React.FC = () => {
         description: errorMessage,
         variant: "destructive"
       });
+
+      // Handle specific constraint error
+      if (error.response?.status === 409 && error.response?.data?.hasRelatedRecords) {
+        // Handle this specifically in the deleteProduct flow
+        return true;
+      }
     } else {
       toast({
         title: "Error",
@@ -79,6 +101,7 @@ const ProductsInventory: React.FC = () => {
         variant: "destructive"
       });
     }
+    return false;
   }, [logout]); 
 
   const fetchProducts = useCallback(async () => {
@@ -105,10 +128,46 @@ const ProductsInventory: React.FC = () => {
   }, [user?.currentBusinessLine, fetchProducts]);
 
   const handleDeleteProduct = async (productId: number) => {
-    if (!confirm("Are you sure you want to delete this product?")) return;
+    try {
+      // First, check if product has related price list items
+      const checkResponse = await axiosInstance.get(
+        `${process.env.NEXT_PUBLIC_API_URL}/products/${productId}/can-delete`
+      );
+      
+      const hasRelatedPriceList = checkResponse.data.hasRelatedRecords;
+      
+      if (hasRelatedPriceList) {
+        // Show confirmation with warning about price lists
+        setDeleteDialogSeverity("danger");
+        setDeleteDialogMessage(
+          `This product is used in one or more price lists. Deleting it will remove all related price list entries. Are you sure you want to proceed?`
+        );
+      } else {
+        // Standard confirmation
+        setDeleteDialogSeverity("warning");
+        setDeleteDialogMessage(
+          "Are you sure you want to delete this product? This action cannot be undone."
+        );
+      }
+      
+      setProductToDelete(productId);
+      setDeleteDialogOpen(true);
+    } catch (error) {
+      console.error('Error checking product references:', error);
+      handleApiError(error, 'Failed to check product references');
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!productToDelete) return;
     
     try {
-      await axiosInstance.delete(`${process.env.NEXT_PUBLIC_API_URL}/products/${productId}`);
+      await axiosInstance.delete(
+        `${process.env.NEXT_PUBLIC_API_URL}/products/${productToDelete}`,
+        { 
+          data: { forceCascade: deleteDialogSeverity === "danger" } 
+        }
+      );
       
       // Refresh product list
       fetchProducts();
@@ -117,20 +176,33 @@ const ProductsInventory: React.FC = () => {
         title: "Success",
         description: "Product deleted successfully",
       });
+      
+      // Close dialog and reset state
+      setDeleteDialogOpen(false);
+      setProductToDelete(null);
     } catch (error) {
       console.error('Error deleting product:', error);
-      handleApiError(error, 'Failed to delete product');
+      const isHandled = handleApiError(error, 'Failed to delete product');
+      
+      if (!isHandled) {
+        setDeleteDialogOpen(false);
+        setProductToDelete(null);
+      }
     }
   };
 
+  const cancelDelete = () => {
+    setDeleteDialogOpen(false);
+    setProductToDelete(null);
+  };
+
   const handleAddProduct = () => {
-    setSelectedProduct(undefined); // Clear any selected product
+    setSelectedProduct(undefined);
     setIsDialogOpen(true);
   };
 
   const handleEditProduct = async (productId: number) => {
     try {
-      // Get full product details for editing
       const response = await axiosInstance.get(
         `${process.env.NEXT_PUBLIC_API_URL}/products/${productId}`
       );
@@ -219,12 +291,39 @@ const ProductsInventory: React.FC = () => {
         </TableBody>
       </Table>
 
+      {/* Product Form Dialog */}
       <ProductDialog 
         open={isDialogOpen} 
         onClose={handleCloseDialog}
         onProductSaved={fetchProducts}
         product={selectedProduct}
       />
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              {deleteDialogSeverity === "danger" && (
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+              )}
+              Confirm Deletion
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteDialogMessage}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelDelete}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmDelete}
+              className={deleteDialogSeverity === "danger" ? "bg-red-600 hover:bg-red-700" : ""}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

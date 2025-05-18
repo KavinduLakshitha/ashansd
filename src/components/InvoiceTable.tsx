@@ -44,7 +44,7 @@ export default function InvoiceTable({
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
-  const { getBusinessLineID } = useAuth(); // Use auth context to get business line ID
+  const { getBusinessLineID } = useAuth();
 
   const validItems = rows
   .filter(row => row.quantity > 0)

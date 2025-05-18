@@ -104,15 +104,7 @@ export default function SalesDashboard() {
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth());
   const [selectedYear, setSelectedYear] = useState<number>(currentDate.getFullYear());
   
-  const { user } = useAuth();
-
-  const getDateRange = (): { startDate: Date, endDate: Date } => {
-    const startDate = new Date(selectedYear, selectedMonth, 1);
-    const endDate = new Date(selectedYear, selectedMonth + 1, 0); // Last day of month
-    endDate.setHours(23, 59, 59, 999);
-    
-    return { startDate, endDate };
-  };
+  const { user } = useAuth();  
 
   const groupDataByDay = (data: SaleData[]): GroupedSaleData[] => {
     const groupedByDay: { [key: string]: GroupedSaleData } = {};
@@ -148,6 +140,15 @@ export default function SalesDashboard() {
   };
 
   useEffect(() => {
+
+    const getDateRange = (): { startDate: Date, endDate: Date } => {
+      const startDate = new Date(selectedYear, selectedMonth, 1);
+      const endDate = new Date(selectedYear, selectedMonth + 1, 0);
+      endDate.setHours(23, 59, 59, 999);
+      
+      return { startDate, endDate };
+    };
+
     const fetchSalesData = async () => {
       if (!user?.currentBusinessLine) {
         setError('Business line ID not found');
