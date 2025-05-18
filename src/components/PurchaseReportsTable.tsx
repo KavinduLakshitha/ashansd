@@ -81,7 +81,7 @@ const PurchaseReportsTable = () => {
         const businessLineId = getBusinessLineID();
         
         const vendorsResponse = await axios.get(
-          `${process.env.NEXT_PUBLIC_API_URL}/vendors/${businessLineId}`
+          `${process.env.NEXT_PUBLIC_API_URL}/vendors?businessLineId=${businessLineId}`
         );
         
         const vendorsData = Array.isArray(vendorsResponse.data) 
