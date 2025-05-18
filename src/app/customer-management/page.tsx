@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Trash, Loader2 } from "lucide-react";
+import { Edit, Trash, Loader2, ChevronDown, ChevronUp } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AddCustomerDialog from "@/components/AddCustomer";
 import { useState, useEffect, useCallback } from "react";
@@ -98,6 +98,14 @@ export default function CustomerManagement() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(20);
+  const [totalCustomers, setTotalCustomers] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  
   // Delete state
   const [customerToDelete, setCustomerToDelete] = useState<DeleteStatus | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -106,23 +114,29 @@ export default function CustomerManagement() {
   const router = useRouter();
   const { getBusinessLineID, user } = useAuth();
 
-  const fetchCustomers = useCallback(async () => {
+  const fetchCustomers = useCallback(async (pageNum = 1, loadMore = false) => {
     if (!user) return;
     
     try {
       const businessLineId = getBusinessLineID();
+      setIsLoading(pageNum === 1 && !loadMore);
+      setIsLoadingMore(loadMore);
   
       const response = await api.get('/customers', {
-        params: { businessLineId },
+        params: { 
+          businessLineId,
+          page: pageNum,
+          limit
+        },
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
   
-      const filteredCustomers = response.data.filter(
-        (customer: Customer) => customer.BusinessLineID === businessLineId
-      );
-  
+      // Assuming the API returns { data: Customer[], total: number }
+      const { data, total } = response.data;
+      setTotalCustomers(total || 0);
+      
       const customersWithData = await Promise.all(
-        filteredCustomers.map(async (customer: Customer) => {
+        data.map(async (customer: Customer) => {
           try {
             const outstandingResponse = await api.get(
               `/payments/customer/${customer.CustomerID}/outstanding`
@@ -134,8 +148,6 @@ export default function CustomerManagement() {
               console.error(`Error fetching pending payments for customer ${customer.CustomerID}:`, error);
               return { data: { pendingCheques: [], pendingCredits: [] } as PendingPayments };
             });
-
-            console.log(`Pending credits for ${customer.CusName}:`, pendingResponse.data.pendingCredits);
             
             const upcomingCheques = pendingResponse.data.pendingCheques.reduce(
               (total: number, cheque: ChequeItem) => total + (Number(cheque.Amount) || 0), 
@@ -146,8 +158,6 @@ export default function CustomerManagement() {
               (total: number, credit: CreditItem) => total + (Number(credit.Amount) || 0), 
               0
             );
-
-            console.log(`${customer.CusName} - Total pending credits: ${pendingCredits}`);
             
             return {
               ...customer,
@@ -162,7 +172,15 @@ export default function CustomerManagement() {
         })
       );
   
-      setCustomers(customersWithData);
+      if (loadMore) {
+        setCustomers(prev => [...prev, ...customersWithData]);
+      } else {
+        setCustomers(customersWithData);
+      }
+      
+      // Check if we've loaded all customers
+      setHasMore(customersWithData.length === limit);
+      setPage(pageNum);
     } catch (error: unknown) {
       console.error('Error fetching customers:', error);
       toast({
@@ -170,8 +188,17 @@ export default function CustomerManagement() {
         description: "Failed to fetch customers",
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
+      setIsLoadingMore(false);
     }
-  }, [toast, getBusinessLineID, user]);
+  }, [toast, getBusinessLineID, user, limit]);
+
+  const loadMoreCustomers = () => {
+    if (hasMore && !isLoadingMore) {
+      fetchCustomers(page + 1, true);
+    }
+  };
 
   useEffect(() => {
     fetchCustomers();
@@ -194,7 +221,7 @@ export default function CustomerManagement() {
     setIsDialogOpen(false);
     setSelectedCustomerId(null);
     setIsEditMode(false);
-    fetchCustomers();
+    fetchCustomers(1); // Refresh from first page after changes
   };
 
   const handleRowClick = (id: number) => {
@@ -245,7 +272,7 @@ export default function CustomerManagement() {
                 description: "Customer deleted successfully"
               });
               
-              fetchCustomers();
+              fetchCustomers(1); // Refresh from first page after delete
             } catch (deleteError: unknown) {
               // Handle constraint errors during direct delete
               const apiDeleteError = deleteError as ApiError;
@@ -299,7 +326,7 @@ export default function CustomerManagement() {
           : "Customer deleted successfully",
       });
       
-      fetchCustomers();
+      fetchCustomers(1); // Refresh from first page after delete
       setCustomerToDelete(null);
     } catch (error: unknown) {
       console.error('Error deleting customer:', error);
@@ -359,6 +386,16 @@ export default function CustomerManagement() {
     generateCustomerCode(customer.CustomerID).toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // Reset to first page when search term changes
+  useEffect(() => {
+    if (searchTerm) {
+      // Only fetch from API if we're not searching locally
+      // For local search, we just filter the already loaded customers
+    } else if (page !== 1) {
+      fetchCustomers(1);
+    }
+  }, [searchTerm, fetchCustomers]);
+
   if (!user) {
     return (
       <Card>
@@ -366,7 +403,10 @@ export default function CustomerManagement() {
           <CardTitle className="text-xl font-semibold text-gray-800">Customer Management</CardTitle>
         </CardHeader>
         <CardContent className="p-6 text-center">
-          Loading customer data...
+          <div className="flex flex-col items-center justify-center py-10">
+            <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+            <p>Loading customer data...</p>
+          </div>
         </CardContent>
       </Card>
     );
@@ -400,123 +440,174 @@ export default function CustomerManagement() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <div className="border border-gray-200 rounded-sm">
-            <Table>
-              <TableHeader className="bg-gray-50">
-                <TableRow className="border-b border-gray-200">
-                  <TableCell className="font-bold border-r border-gray-200">Customer Code</TableCell>
-                  <TableCell className="font-bold border-r border-gray-200">Customer Name</TableCell>
-                  <TableCell className="font-bold border-r border-gray-200">Credit Usage</TableCell>
-                  <TableCell className="font-bold border-r border-gray-200">Upcoming Cheques</TableCell>
-                  <TableCell className="font-bold border-r border-gray-200">Pending Credits</TableCell>
-                  <TableCell className="font-bold border-r border-gray-200">Status</TableCell>
-                  <TableCell className="font-bold">Actions</TableCell>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredCustomers.map((customer) => (
-                  <TableRow
-                    key={customer.CustomerID}
-                    className="cursor-pointer hover:bg-gray-100 border-b border-gray-200"
-                    onClick={() => handleRowClick(customer.CustomerID)}
-                  >
-                    <TableCell className="border-r border-gray-200">
-                      {generateCustomerCode(customer.CustomerID)}
-                    </TableCell>
-                    <TableCell className="border-r border-gray-200">{customer.CusName}</TableCell>
-                    <TableCell className={`border-r border-gray-200 ${getCreditUsageColor(customer.TotalOutstanding || 0, customer.CreditLimit)}`}>
-                      {formatCurrency(customer.TotalOutstanding)}/{formatCurrency(customer.CreditLimit)}
-                    </TableCell>                  
-                    <TableCell className="border-r border-gray-200">
-                      {formatCurrency(customer.UpcomingCheques)}
-                    </TableCell>
-
-                    <TableCell className="border-r border-gray-200">
-                      {formatCurrency(customer.PendingCredits)}
-                    </TableCell>
-                    <TableCell className="border-r border-gray-200">
-                      <span className={`px-2 py-1 rounded-full ${getStatusColor(customer.Status)}`}>
-                        {customer.Status}
-                      </span>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex space-x-2">
-                        <Button 
-                          variant="outline" 
-                          size="icon" 
-                          onClick={(e) => handleEditCustomer(e, customer.CustomerID)}
-                        >
-                          <Edit className="h-4 w-4" />
-                        </Button>
-                        <Button 
-                          variant="outline" 
-                          size="icon"
-                          onClick={(e) => initiateDelete(e, customer.CustomerID)}
-                        >
-                          <Trash className="h-4 w-4 text-red-500" />
-                        </Button>
-                      </div>
-                    </TableCell>
+          {isLoading ? (
+            <div className="flex flex-col items-center justify-center py-10">
+              <Loader2 className="h-8 w-8 animate-spin text-primary mb-4" />
+              <p>Loading customers...</p>
+            </div>
+          ) : (
+            <div className="border border-gray-200 rounded-sm">
+              <Table>
+                <TableHeader className="bg-gray-50">
+                  <TableRow className="border-b border-gray-200">
+                    <TableCell className="font-bold border-r border-gray-200">Customer Code</TableCell>
+                    <TableCell className="font-bold border-r border-gray-200">Customer Name</TableCell>
+                    <TableCell className="font-bold border-r border-gray-200">Credit Usage</TableCell>
+                    <TableCell className="font-bold border-r border-gray-200">Upcoming Cheques</TableCell>
+                    <TableCell className="font-bold border-r border-gray-200">Pending Credits</TableCell>
+                    <TableCell className="font-bold border-r border-gray-200">Status</TableCell>
+                    <TableCell className="font-bold">Actions</TableCell>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
+                </TableHeader>
+                <TableBody>
+                  {filteredCustomers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-8">
+                        {searchTerm 
+                          ? "No customers match your search criteria" 
+                          : "No customers found"
+                        }
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    <>
+                      {filteredCustomers.map((customer) => (
+                        <TableRow
+                          key={customer.CustomerID}
+                          className="cursor-pointer hover:bg-gray-100 border-b border-gray-200"
+                          onClick={() => handleRowClick(customer.CustomerID)}
+                        >
+                          <TableCell className="border-r border-gray-200">
+                            {generateCustomerCode(customer.CustomerID)}
+                          </TableCell>
+                          <TableCell className="border-r border-gray-200">{customer.CusName}</TableCell>
+                          <TableCell className={`border-r border-gray-200 ${getCreditUsageColor(customer.TotalOutstanding || 0, customer.CreditLimit)}`}>
+                            {formatCurrency(customer.TotalOutstanding)}/{formatCurrency(customer.CreditLimit)}
+                          </TableCell>                  
+                          <TableCell className="border-r border-gray-200">
+                            {formatCurrency(customer.UpcomingCheques)}
+                          </TableCell>
+                          <TableCell className="border-r border-gray-200">
+                            {formatCurrency(customer.PendingCredits)}
+                          </TableCell>
+                          <TableCell className="border-r border-gray-200">
+                            <span className={`px-2 py-1 rounded-full ${getStatusColor(customer.Status)}`}>
+                              {customer.Status}
+                            </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex space-x-2">
+                              <Button 
+                                variant="outline" 
+                                size="icon" 
+                                onClick={(e) => handleEditCustomer(e, customer.CustomerID)}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button 
+                                variant="outline" 
+                                size="icon"
+                                onClick={(e) => initiateDelete(e, customer.CustomerID)}
+                              >
+                                <Trash className="h-4 w-4 text-red-500" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                      
+                      {/* Load more button (only shown when not searching) */}
+                      {!searchTerm && hasMore && (
+                        <TableRow>
+                          <TableCell colSpan={7} className="text-center p-4">
+                            <Button 
+                              variant="outline" 
+                              onClick={loadMoreCustomers} 
+                              disabled={isLoadingMore}
+                              className="w-full"
+                            >
+                              {isLoadingMore ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Loading more...
+                                </>
+                              ) : (
+                                <>
+                                  <ChevronDown className="mr-2 h-4 w-4" />
+                                  Load More
+                                </>
+                              )}
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          
+          {/* Pagination info */}
+          {!isLoading && !searchTerm && filteredCustomers.length > 0 && (
+            <div className="py-3 px-4 text-sm text-gray-500 border-t">
+              Showing {filteredCustomers.length} of {totalCustomers} customers
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Delete Confirmation Dialog - Enhanced with cascade delete option and nested dependencies */}
+      {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!customerToDelete} onOpenChange={open => !open && cancelDelete()}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
-            {customerToDelete?.hasDependencies 
-              ? "Cascade Delete Warning" 
-              : "Confirm Deletion"}
-          </AlertDialogTitle>
-          {/* Remove the AlertDialogDescription wrapper that's causing the issue */}
-        </AlertDialogHeader>
-        
-        {/* Content moved outside of AlertDialogDescription */}
-        {customerToDelete?.hasDependencies ? (
-          <>
-            <div className="mb-3 text-sm text-muted-foreground">
-              You&apos;re about to delete <strong>{customerToDelete.customerName}</strong>, which has the following dependencies:
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {customerToDelete?.hasDependencies 
+                ? "Cascade Delete Warning" 
+                : "Confirm Deletion"}
+            </AlertDialogTitle>
+          </AlertDialogHeader>
+          
+          {/* Content */}
+          {customerToDelete?.hasDependencies ? (
+            <>
+              <div className="mb-3 text-sm text-muted-foreground">
+                You&apos;re about to delete <strong>{customerToDelete.customerName}</strong>, which has the following dependencies:
+              </div>
+              <ul className="list-disc pl-5 mb-3 text-sm text-muted-foreground">
+                {customerToDelete.references && customerToDelete.references
+                  .filter(ref => ref.count > 0)
+                  .map((dep, index) => (
+                    <li key={index} className="mb-2">
+                      <div className="font-medium">
+                        <span>{dep.count}</span> {dep.displayName}
+                      </div>
+                      
+                      {/* Show child dependencies if they exist */}
+                      {dep.childReferences && dep.childReferences.length > 0 && (
+                        <ul className="list-circle pl-8 mt-1 text-sm">
+                          {dep.childReferences
+                            .filter(childRef => childRef.count > 0)
+                            .map((childRef, childIndex) => (
+                              <li key={childIndex}>
+                                <span className="font-medium">{childRef.count}</span> {childRef.displayName}
+                              </li>
+                            ))}
+                        </ul>
+                      )}
+                    </li>
+                  ))}
+              </ul>
+              <div className="text-amber-500 font-semibold text-sm">
+                Deleting this customer will also delete all these related records. This action cannot be undone.
+              </div>
+            </>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              Are you sure you want to delete <strong>{customerToDelete?.customerName}</strong>? This action cannot be undone.
             </div>
-            <ul className="list-disc pl-5 mb-3 text-sm text-muted-foreground">
-              {customerToDelete.references && customerToDelete.references
-                .filter(ref => ref.count > 0)
-                .map((dep, index) => (
-                  <li key={index} className="mb-2">
-                    <div className="font-medium">
-                      <span>{dep.count}</span> {dep.displayName}
-                    </div>
-                    
-                    {/* Show child dependencies if they exist */}
-                    {dep.childReferences && dep.childReferences.length > 0 && (
-                      <ul className="list-circle pl-8 mt-1 text-sm">
-                        {dep.childReferences
-                          .filter(childRef => childRef.count > 0)
-                          .map((childRef, childIndex) => (
-                            <li key={childIndex}>
-                              <span className="font-medium">{childRef.count}</span> {childRef.displayName}
-                            </li>
-                          ))}
-                      </ul>
-                    )}
-                  </li>
-                ))}
-            </ul>
-            <div className="text-amber-500 font-semibold text-sm">
-              Deleting this customer will also delete all these related records. This action cannot be undone.
-            </div>
-          </>
-        ) : (
-          <div className="text-sm text-muted-foreground">
-            Are you sure you want to delete <strong>{customerToDelete?.customerName}</strong>? This action cannot be undone.
-          </div>
-        )}
-        
+          )}
+          
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             {customerToDelete?.hasDependencies ? (

@@ -322,7 +322,7 @@ const UserDialog = ({ open, onClose, user, onSuccess }: UserDialogProps) => {
               </Select>
             </div>
           </div>
-          <div className="space-y-2">
+          {/* <div className="space-y-2">
             <label className="block text-sm font-medium text-gray-700">Screen Access</label>
             <div className="space-y-2">
               {availableScreens.map((screen) => (
@@ -336,7 +336,7 @@ const UserDialog = ({ open, onClose, user, onSuccess }: UserDialogProps) => {
                 </div>
               ))}
             </div>
-          </div>
+          </div> */}
         </div>
         <DialogFooter className="gap-2">
           <Button

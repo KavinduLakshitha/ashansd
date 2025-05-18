@@ -136,15 +136,6 @@ const AddCustomerDialog = ({
       });
       return false;
     }
-    if (!contactNumber.trim()) {
-      setError("Contact number is required");
-      toast({
-        title: "Error",
-        description: "Contact number is required",
-        variant: "destructive",
-      });
-      return false;
-    }
     if (creditLimit && isNaN(Number(creditLimit))) {
       setError("Credit limit must be a valid number");
       toast({
@@ -265,7 +256,7 @@ const AddCustomerDialog = ({
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700">
-                Contact Number<span className="text-red-500">*</span>
+                Contact Number
               </label>
               <Input
                 value={contactNumber}

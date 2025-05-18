@@ -23,6 +23,7 @@ export default function Reports() {
                     <TabsTrigger value="sales">Sales</TabsTrigger>
                     <TabsTrigger value="purchases">Purchase</TabsTrigger>
                     <TabsTrigger value="inventory">Inventory</TabsTrigger>
+                    <TabsTrigger value="payments">Payments History</TabsTrigger>
                 </TabsList>
                 <TabsContent value="sales">
                     <SalesTable />
