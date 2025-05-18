@@ -294,7 +294,7 @@ const UserDialog = ({ open, onClose, user, onSuccess }: UserDialogProps) => {
                   <SelectValue placeholder="Select user type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="super">Super User</SelectItem>
+                  <SelectItem value="superuser">Super User</SelectItem>
                   <SelectItem value="management">Management User</SelectItem>
                   <SelectItem value="sales">Sales User</SelectItem>
                 </SelectContent>

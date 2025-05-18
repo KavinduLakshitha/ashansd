@@ -4,6 +4,16 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
+import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Edit, Trash } from "lucide-react";
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
@@ -27,6 +37,9 @@ export default function BusinessLineManagement() {
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
   const [selectedBusinessLine, setSelectedBusinessLine] = useState<BusinessLine | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [businessLineToDelete, setBusinessLineToDelete] = useState<number | null>(null);
+  const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
 
   const fetchBusinessLines = useCallback(async () => {
     try {
@@ -61,40 +74,46 @@ export default function BusinessLineManagement() {
     fetchBusinessLines();
   };
 
-  const handleDelete = async (id: number) => {
-    if (confirm("Are you sure you want to delete this business line?")) {
-      try {
-        const response = await api.delete(`/business-lines/${id}`);
-        
-        // Check if the response indicates dependencies
-        if (response.data.hasDependencies) {
-          toast({
-            title: "Cannot Delete",
-            description: response.data.message,
-            variant: "destructive",
-          });
-          return;
-        }
-        
-        toast({
-          title: "Success",
-          description: "Business line deleted successfully",
-        });
-        fetchBusinessLines();
-      } catch (error) {
-        console.error('Error deleting business line:', error);
-        // For other types of errors
-        let errorMessage = "Failed to delete business line";
-        if (error && typeof error === "object" && "response" in error) {
-          const err = error as { response?: { data?: { message?: string } } };
-          errorMessage = err.response?.data?.message || errorMessage;
-        }
-        toast({
-          title: "Error",
-          description: errorMessage,
-          variant: "destructive",
-        });
+  const openDeleteDialog = (id: number) => {
+    setBusinessLineToDelete(id);
+    setDeleteErrorMessage(null); // Reset error message when opening dialog
+    setIsDeleteDialogOpen(true);
+  };
+
+  const closeDeleteDialog = () => {
+    setIsDeleteDialogOpen(false);
+    setBusinessLineToDelete(null);
+    setDeleteErrorMessage(null);
+  };
+
+  const handleDelete = async () => {
+    if (!businessLineToDelete) return;
+    
+    try {
+      const response = await api.delete(`/business-lines/${businessLineToDelete}`);
+      
+      // Check if the response indicates dependencies
+      if (response.data.hasDependencies) {
+        setDeleteErrorMessage(response.data.message);
+        return; // Keep dialog open to show the error
       }
+      
+      // Only close and show success if the delete was successful
+      closeDeleteDialog();
+      toast({
+        title: "Success",
+        description: "Business line deleted successfully",
+      });
+      fetchBusinessLines();
+    } catch (error) {
+      console.error('Error deleting business line:', error);
+      // For other types of errors
+      let errorMessage = "Failed to delete business line";
+      if (error && typeof error === "object" && "response" in error) {
+        const err = error as { response?: { data?: { message?: string } } };
+        errorMessage = err.response?.data?.message || errorMessage;
+      }
+      setDeleteErrorMessage(errorMessage);
     }
   };
 
@@ -115,10 +134,6 @@ export default function BusinessLineManagement() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
-          {/* <Button variant="outline">
-            <Filter className="mr-2 h-4 w-4" />
-            Filters
-          </Button> */}
           <Button variant="default" onClick={() => handleDialogOpen()}>
             New Business Line
           </Button>
@@ -164,7 +179,7 @@ export default function BusinessLineManagement() {
                       <Button 
                         variant="outline" 
                         size="icon"
-                        onClick={() => handleDelete(row.BusinessLineID)}
+                        onClick={() => openDeleteDialog(row.BusinessLineID)}
                       >
                         <Trash className="h-4 w-4 text-red-500" />
                       </Button>
@@ -176,12 +191,39 @@ export default function BusinessLineManagement() {
           </Table>
         </div>
       </CardContent>
+      
+      {/* Business Line Edit/Add Dialog */}
       <BusinessLineDialog 
         open={isDialogOpen} 
         onClose={handleDialogClose}
         businessLineId={selectedBusinessLine?.BusinessLineID}
         initialData={selectedBusinessLine ? { BusinessLineName: selectedBusinessLine.BusinessLineName } : undefined}
       />
+      
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteErrorMessage ? "Cannot Delete Business Line" : "Are you sure?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription className={deleteErrorMessage ? "text-red-500" : ""}>
+              {deleteErrorMessage || 
+                "This action will permanently delete this business line and cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={closeDeleteDialog}>
+              {deleteErrorMessage ? "Close" : "Cancel"}
+            </AlertDialogCancel>
+            {!deleteErrorMessage && (
+              <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
+                Delete
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
