@@ -4,13 +4,22 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Trash } from "lucide-react";
+import { Edit, Trash, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AddCustomerDialog from "@/components/AddCustomer";
 import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/auth/auth-context";
 import api from "@/lib/api/axios";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface ChequeItem {
   Amount: string | number;
@@ -44,12 +53,56 @@ interface Customer {
   PendingCredits?: number;
 }
 
+interface ChildDependencyReference {
+  table: string;
+  displayName: string;
+  count: number;
+  hasReferences: boolean;
+  items: unknown[];
+}
+
+interface DependencyReference {
+  table: string;
+  displayName: string;
+  count: number;
+  hasReferences: boolean;
+  items: unknown[];
+  details?: unknown[];
+  childReferences?: ChildDependencyReference[];
+}
+
+interface DeleteStatus {
+  customerId: number;
+  customerName: string;
+  canDelete: boolean;
+  hasDependencies: boolean;
+  totalReferences: number;
+  references: DependencyReference[];
+}
+
+// Define API error interface
+interface ApiError {
+  response?: {
+    status?: number;
+    data?: {
+      error?: string;
+      message?: string;
+    };
+  };
+  message?: string;
+}
+
 export default function CustomerManagement() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  
+  // Delete state
+  const [customerToDelete, setCustomerToDelete] = useState<DeleteStatus | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  
   const { toast } = useToast();
   const router = useRouter();
   const { getBusinessLineID, user } = useAuth();
@@ -59,11 +112,10 @@ export default function CustomerManagement() {
     
     try {
       const businessLineId = getBusinessLineID();
-      const token = localStorage.getItem('token');
   
       const response = await api.get('/customers', {
         params: { businessLineId },
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
       });
   
       const filteredCustomers = response.data.filter(
@@ -79,10 +131,12 @@ export default function CustomerManagement() {
             
             const pendingResponse = await api.get<PendingPayments>(
               `/payments/pending/${businessLineId}?customerId=${customer.CustomerID}`
-            ).catch(error => {
+            ).catch((error: ApiError) => {
               console.error(`Error fetching pending payments for customer ${customer.CustomerID}:`, error);
               return { data: { pendingCheques: [], pendingCredits: [] } as PendingPayments };
             });
+
+            console.log(`Pending credits for ${customer.CusName}:`, pendingResponse.data.pendingCredits);
             
             const upcomingCheques = pendingResponse.data.pendingCheques.reduce(
               (total: number, cheque: ChequeItem) => total + (Number(cheque.Amount) || 0), 
@@ -93,6 +147,8 @@ export default function CustomerManagement() {
               (total: number, credit: CreditItem) => total + (Number(credit.Amount) || 0), 
               0
             );
+
+            console.log(`${customer.CusName} - Total pending credits: ${pendingCredits}`);
             
             return {
               ...customer,
@@ -100,7 +156,7 @@ export default function CustomerManagement() {
               UpcomingCheques: upcomingCheques,
               PendingCredits: pendingCredits
             };
-          } catch (error) {
+          } catch (error: unknown) {
             console.error(`Error fetching data for customer ${customer.CustomerID}:`, error);
             return customer;
           }
@@ -108,7 +164,7 @@ export default function CustomerManagement() {
       );
   
       setCustomers(customersWithData);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error('Error fetching customers:', error);
       toast({
         title: "Error",
@@ -146,30 +202,129 @@ export default function CustomerManagement() {
     router.push(`/customer-details/${id}`);
   };
 
-  const handleDelete = async (event: React.MouseEvent, id: number) => {
+  // Handle initiating the delete process
+  const initiateDelete = async (event: React.MouseEvent, id: number) => {
     event.stopPropagation();
-    if (confirm("Are you sure you want to delete this customer?")) {
-      try {
-        const token = localStorage.getItem('token');
-        await api.delete(`/customers/${id}`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        toast({
-          title: "Success",
-          description: "Customer deleted successfully",
-        });
-        fetchCustomers();
-      } catch (error) {
-        console.error('Error deleting customer:', error);
+    
+    try {
+      const response = await api.get(`/customers/${id}/can-delete`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+      });
+      
+      setCustomerToDelete(response.data);
+    } catch (error: unknown) {
+      console.error('Error checking customer delete status:', error);
+      
+      const apiError = error as ApiError;
+      
+      if (apiError.response?.status === 404) {
         toast({
           title: "Error",
-          description: "Failed to delete customer",
+          description: "Customer not found",
           variant: "destructive",
         });
+        return;
       }
+      
+      if (
+        apiError.response?.status === 500 &&
+        apiError.response?.data?.error?.includes("doesn't exist")
+      ) {
+        // Get the customer info for the prompt
+        const customer = customers.find(c => c.CustomerID === id);
+        if (customer) {
+          // Proceed with direct delete attempt
+          const confirmDelete = window.confirm(`Are you sure you want to delete customer ${customer.CusName}?`);
+          if (confirmDelete) {
+            try {
+              await api.delete(`/customers/${id}`, {
+                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
+              });
+              
+              toast({
+                title: "Success",
+                description: "Customer deleted successfully"
+              });
+              
+              fetchCustomers();
+            } catch (deleteError: unknown) {
+              // Handle constraint errors during direct delete
+              const apiDeleteError = deleteError as ApiError;
+              if (apiDeleteError.response?.status === 409) {
+                toast({
+                  title: "Error",
+                  description: apiDeleteError.response?.data?.message || "Cannot delete customer with associated records",
+                  variant: "destructive"
+                });
+              } else {
+                toast({
+                  title: "Error",
+                  description: "Failed to delete customer",
+                  variant: "destructive"
+                });
+              }
+            }
+          }
+        }
+        return;
+      }
+      
+      toast({
+        title: "Error",
+        description: "Failed to check if customer can be deleted",
+        variant: "destructive",
+      });
     }
+  };
+
+  // Handle confirming the delete operation
+  const confirmDelete = async (cascade: boolean = false) => {
+    if (!customerToDelete) return;
+    
+    setIsDeleting(true);
+    
+    try {
+      const token = localStorage.getItem('token');
+      const endpoint = cascade 
+        ? `/customers/${customerToDelete.customerId}?cascade=true` 
+        : `/customers/${customerToDelete.customerId}`;
+        
+      await api.delete(endpoint, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      toast({
+        title: "Success",
+        description: cascade 
+          ? "Customer and all associated records deleted successfully" 
+          : "Customer deleted successfully",
+      });
+      
+      fetchCustomers();
+      setCustomerToDelete(null);
+    } catch (error: unknown) {
+      console.error('Error deleting customer:', error);
+      
+      let errorMessage = "Failed to delete customer";
+      const apiError = error as ApiError;
+      
+      if (apiError.response?.data?.message) {
+        errorMessage = apiError.response.data.message;
+      }
+      
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Cancel delete operation
+  const cancelDelete = () => {
+    setCustomerToDelete(null);
   };
 
   const generateCustomerCode = (id: number) => {
@@ -221,93 +376,184 @@ export default function CustomerManagement() {
   const businessLineId = user ? getBusinessLineID() : 0;
 
   return (
-    <Card>
-      <CardHeader className="bg-gray-50 border-b border-gray-200 flex flex-row items-center justify-between">
-        <CardTitle className="text-xl font-semibold text-gray-800">Customer Management</CardTitle>
-        <div className="flex items-center space-x-4">
-          <Input 
-            className="w-96" 
-            placeholder="Search by name or code" 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          <Button variant="secondary">Filters</Button>
-          <Button variant="default" onClick={handleAddCustomer}>
-            New Customer
-          </Button>
-          <AddCustomerDialog 
-            open={isDialogOpen} 
-            onClose={handleDialogClose}
-            businessLineId={businessLineId || null}
-            customerId={selectedCustomerId}
-            isEditMode={isEditMode}
-          />
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <div className="border border-gray-200 rounded-sm">
-          <Table>
-            <TableHeader className="bg-gray-50">
-              <TableRow className="border-b border-gray-200">
-                <TableCell className="font-bold border-r border-gray-200">Customer Code</TableCell>
-                <TableCell className="font-bold border-r border-gray-200">Customer Name</TableCell>
-                <TableCell className="font-bold border-r border-gray-200">Credit Usage</TableCell>
-                <TableCell className="font-bold border-r border-gray-200">Upcoming Cheques</TableCell>
-                <TableCell className="font-bold border-r border-gray-200">Pending Credits</TableCell>
-                <TableCell className="font-bold border-r border-gray-200">Status</TableCell>
-                <TableCell className="font-bold">Actions</TableCell>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredCustomers.map((customer) => (
-                <TableRow
-                  key={customer.CustomerID}
-                  className="cursor-pointer hover:bg-gray-100 border-b border-gray-200"
-                  onClick={() => handleRowClick(customer.CustomerID)}
-                >
-                  <TableCell className="border-r border-gray-200">
-                    {generateCustomerCode(customer.CustomerID)}
-                  </TableCell>
-                  <TableCell className="border-r border-gray-200">{customer.CusName}</TableCell>
-                  <TableCell className={`border-r border-gray-200 ${getCreditUsageColor(customer.TotalOutstanding || 0, customer.CreditLimit)}`}>
-                    {formatCurrency(customer.TotalOutstanding)}/{formatCurrency(customer.CreditLimit)}
-                  </TableCell>                  
-                  <TableCell className="border-r border-gray-200">
-                    {formatCurrency(customer.UpcomingCheques)}
-                  </TableCell>
-
-                  <TableCell className="border-r border-gray-200">
-                    {formatCurrency(customer.PendingCredits)}
-                  </TableCell>
-                  <TableCell className="border-r border-gray-200">
-                    <span className={`px-2 py-1 rounded-full ${getStatusColor(customer.Status)}`}>
-                      {customer.Status}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex space-x-2">
-                      <Button 
-                        variant="outline" 
-                        size="icon" 
-                        onClick={(e) => handleEditCustomer(e, customer.CustomerID)}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="icon"
-                        onClick={(e) => handleDelete(e, customer.CustomerID)}
-                      >
-                        <Trash className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </TableCell>
+    <>
+      <Card>
+        <CardHeader className="bg-gray-50 border-b border-gray-200 flex flex-row items-center justify-between">
+          <CardTitle className="text-xl font-semibold text-gray-800">Customer Management</CardTitle>
+          <div className="flex items-center space-x-4">
+            <Input 
+              className="w-96" 
+              placeholder="Search by name or code" 
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+            <Button variant="secondary">Filters</Button>
+            <Button variant="default" onClick={handleAddCustomer}>
+              New Customer
+            </Button>
+            <AddCustomerDialog 
+              open={isDialogOpen} 
+              onClose={handleDialogClose}
+              businessLineId={businessLineId || null}
+              customerId={selectedCustomerId}
+              isEditMode={isEditMode}
+            />
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          <div className="border border-gray-200 rounded-sm">
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow className="border-b border-gray-200">
+                  <TableCell className="font-bold border-r border-gray-200">Customer Code</TableCell>
+                  <TableCell className="font-bold border-r border-gray-200">Customer Name</TableCell>
+                  <TableCell className="font-bold border-r border-gray-200">Credit Usage</TableCell>
+                  <TableCell className="font-bold border-r border-gray-200">Upcoming Cheques</TableCell>
+                  <TableCell className="font-bold border-r border-gray-200">Pending Credits</TableCell>
+                  <TableCell className="font-bold border-r border-gray-200">Status</TableCell>
+                  <TableCell className="font-bold">Actions</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
+              </TableHeader>
+              <TableBody>
+                {filteredCustomers.map((customer) => (
+                  <TableRow
+                    key={customer.CustomerID}
+                    className="cursor-pointer hover:bg-gray-100 border-b border-gray-200"
+                    onClick={() => handleRowClick(customer.CustomerID)}
+                  >
+                    <TableCell className="border-r border-gray-200">
+                      {generateCustomerCode(customer.CustomerID)}
+                    </TableCell>
+                    <TableCell className="border-r border-gray-200">{customer.CusName}</TableCell>
+                    <TableCell className={`border-r border-gray-200 ${getCreditUsageColor(customer.TotalOutstanding || 0, customer.CreditLimit)}`}>
+                      {formatCurrency(customer.TotalOutstanding)}/{formatCurrency(customer.CreditLimit)}
+                    </TableCell>                  
+                    <TableCell className="border-r border-gray-200">
+                      {formatCurrency(customer.UpcomingCheques)}
+                    </TableCell>
+
+                    <TableCell className="border-r border-gray-200">
+                      {formatCurrency(customer.PendingCredits)}
+                    </TableCell>
+                    <TableCell className="border-r border-gray-200">
+                      <span className={`px-2 py-1 rounded-full ${getStatusColor(customer.Status)}`}>
+                        {customer.Status}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex space-x-2">
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          onClick={(e) => handleEditCustomer(e, customer.CustomerID)}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          size="icon"
+                          onClick={(e) => initiateDelete(e, customer.CustomerID)}
+                        >
+                          <Trash className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Delete Confirmation Dialog - Enhanced with cascade delete option and nested dependencies */}
+      <AlertDialog open={!!customerToDelete} onOpenChange={open => !open && cancelDelete()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {customerToDelete?.hasDependencies 
+              ? "Cascade Delete Warning" 
+              : "Confirm Deletion"}
+          </AlertDialogTitle>
+          {/* Remove the AlertDialogDescription wrapper that's causing the issue */}
+        </AlertDialogHeader>
+        
+        {/* Content moved outside of AlertDialogDescription */}
+        {customerToDelete?.hasDependencies ? (
+          <>
+            <div className="mb-3 text-sm text-muted-foreground">
+              You&apos;re about to delete <strong>{customerToDelete.customerName}</strong>, which has the following dependencies:
+            </div>
+            <ul className="list-disc pl-5 mb-3 text-sm text-muted-foreground">
+              {customerToDelete.references && customerToDelete.references
+                .filter(ref => ref.count > 0)
+                .map((dep, index) => (
+                  <li key={index} className="mb-2">
+                    <div className="font-medium">
+                      <span>{dep.count}</span> {dep.displayName}
+                    </div>
+                    
+                    {/* Show child dependencies if they exist */}
+                    {dep.childReferences && dep.childReferences.length > 0 && (
+                      <ul className="list-circle pl-8 mt-1 text-sm">
+                        {dep.childReferences
+                          .filter(childRef => childRef.count > 0)
+                          .map((childRef, childIndex) => (
+                            <li key={childIndex}>
+                              <span className="font-medium">{childRef.count}</span> {childRef.displayName}
+                            </li>
+                          ))}
+                      </ul>
+                    )}
+                  </li>
+                ))}
+            </ul>
+            <div className="text-amber-500 font-semibold text-sm">
+              Deleting this customer will also delete all these related records. This action cannot be undone.
+            </div>
+          </>
+        ) : (
+          <div className="text-sm text-muted-foreground">
+            Are you sure you want to delete <strong>{customerToDelete?.customerName}</strong>? This action cannot be undone.
+          </div>
+        )}
+        
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            {customerToDelete?.hasDependencies ? (
+              <Button 
+                variant="destructive" 
+                onClick={() => confirmDelete(true)}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete All"
+                )}
+              </Button>
+            ) : (
+              <Button 
+                variant="destructive" 
+                onClick={() => confirmDelete(false)}
+                disabled={isDeleting}
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </Button>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
