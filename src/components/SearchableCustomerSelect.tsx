@@ -52,12 +52,26 @@ export default function SearchableCustomerSelect({
           }
         });
 
-        // Filter customers for current business line
-        const filteredCustomers = response.data.filter(
-          (customer: Customer) => customer.BusinessLineID === businessLineId
-        );
-
-        setCustomers(filteredCustomers);
+        // Check if response.data is an object with a data property (paginated response)
+        if (response.data && response.data.data) {
+          // Use the data array from the paginated response
+          const customersArray = response.data.data;
+          // Filter customers for current business line if needed
+          const filteredCustomers = customersArray.filter(
+            (customer: Customer) => customer.BusinessLineID === businessLineId
+          );
+          setCustomers(filteredCustomers);
+        } else if (Array.isArray(response.data)) {
+          // Handle the case where response.data is directly the array
+          const filteredCustomers = response.data.filter(
+            (customer: Customer) => customer.BusinessLineID === businessLineId
+          );
+          setCustomers(filteredCustomers);
+        } else {
+          // Neither expected format was found
+          console.error('Unexpected API response format:', response.data);
+          setError('Invalid data format received from server');
+        }
       } catch (err) {
         setError('Failed to fetch customers');
         console.error('Error fetching customers:', err);
