@@ -392,11 +392,10 @@ export default function CustomerManagement() {
   const filteredCustomers = customers.filter(customer =>
     customer.CusName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     generateCustomerCode(customer.CustomerID).toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  ); 
 
   useEffect(() => {
-    if (searchTerm) {
-    } else if (page !== 1) {
+    if (!searchTerm) {
       fetchCustomers(1);
     }
   }, [searchTerm, fetchCustomers]);

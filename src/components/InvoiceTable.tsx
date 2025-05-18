@@ -38,6 +38,30 @@ interface InvoiceRow {
   uniqueId: string;
 }
 
+// Create a debounced price update function
+const updatePriceDebounced = debounce(async (
+  productId: number, 
+  unitPrice: number, 
+  customerId: number, 
+  token: string,
+  onError: (message: string) => void
+) => {
+  try {
+    await axios.put(
+      `${process.env.NEXT_PUBLIC_API_URL}/pricelist/customer/${customerId}/product/${productId}`,
+      { price: unitPrice },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      }
+    );
+  } catch (error) {
+    console.error('Error updating price:', error);
+    onError("Failed to update price");
+  }
+}, 800);
+
 // Memoized Input Component for better performance
 const NumberInput = memo(({ 
   value, 
@@ -73,6 +97,7 @@ const NumberInput = memo(({
     />
   );
 });
+NumberInput.displayName = 'NumberInput';
 
 // Memoized Table Row Component
 const InvoiceTableRow = memo(({ 
@@ -108,6 +133,7 @@ const InvoiceTableRow = memo(({
     </TableRow>
   );
 });
+InvoiceTableRow.displayName = 'InvoiceTableRow';
 
 export default function InvoiceTable({
   customerId,
@@ -128,38 +154,6 @@ export default function InvoiceTable({
       unitPrice: row.unitPrice,
       total: row.total
     }));
-
-  // Create debounced API call for price updates
-  const debouncedPriceUpdate = useCallback(
-    debounce(async (productId: number, unitPrice: number, customerId?: number) => {
-      if (!customerId) return;
-      
-      try {
-        const token = localStorage.getItem('token');
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
-        
-        await axios.put(
-          `${process.env.NEXT_PUBLIC_API_URL}/pricelist/customer/${customerId}/product/${productId}`,
-          { price: unitPrice },
-          {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          }
-        );
-      } catch (error) {
-        console.error('Error updating price:', error);
-        toast({
-          title: "Error",
-          description: "Failed to update price",
-          variant: "destructive",
-        });
-      }
-    }, 800),
-    [toast]
-  );
 
   useEffect(() => {
     const fetchCustomerPrices = async () => {
@@ -269,9 +263,27 @@ export default function InvoiceTable({
     const unitPrice = Math.max(0, parseFloat(value) || 0);
     
     if (customerId) {
-      debouncedPriceUpdate(productId, unitPrice, customerId);
+      const token = localStorage.getItem('token');
+      if (!token) {
+        toast({
+          title: "Error", 
+          description: "No authentication token found",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      const showErrorToast = (message: string) => {
+        toast({
+          title: "Error",
+          description: message,
+          variant: "destructive",
+        });
+      };
+      
+      updatePriceDebounced(productId, unitPrice, customerId, token, showErrorToast);
     }
-  }, [customerId, debouncedPriceUpdate]);
+  }, [customerId, toast]);
 
   // Calculate total in a memoized function
   const getTotalAmount = useCallback(() => {
