@@ -3,7 +3,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/lib/api/axios";
@@ -44,15 +43,7 @@ const UserDialog = ({ open, onClose, user, onSuccess }: UserDialogProps) => {
   const [error, setError] = useState("");
   const { toast } = useToast();
 
-  const isEditMode = !!user;
-
-  const availableScreens = [
-    "Stock Adjustment",
-    "Sales In/Out/Edit",
-    "User Management",
-    "Vendor Management",
-    "Customer Management",
-  ];
+  const isEditMode = !!user;  
 
   useEffect(() => {
     const fetchBusinessLines = async () => {
@@ -205,15 +196,7 @@ const UserDialog = ({ open, onClose, user, onSuccess }: UserDialogProps) => {
   const handleClose = () => {
     resetForm();
     onClose();
-  };
-
-  const toggleScreenSelection = (screen: string) => {
-    setScreens(prev =>
-      prev.includes(screen) 
-        ? prev.filter(item => item !== screen)
-        : [...prev, screen]
-    );
-  };
+  };  
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -321,22 +304,7 @@ const UserDialog = ({ open, onClose, user, onSuccess }: UserDialogProps) => {
                 </SelectContent>
               </Select>
             </div>
-          </div>
-          {/* <div className="space-y-2">
-            <label className="block text-sm font-medium text-gray-700">Screen Access</label>
-            <div className="space-y-2">
-              {availableScreens.map((screen) => (
-                <div key={screen} className="flex items-center space-x-2">
-                  <Checkbox
-                    checked={screens.includes(screen)}
-                    onCheckedChange={() => toggleScreenSelection(screen)}
-                    disabled={isSubmitting}
-                  />
-                  <span className="text-sm">{screen}</span>
-                </div>
-              ))}
-            </div>
-          </div> */}
+          </div>          
         </div>
         <DialogFooter className="gap-2">
           <Button

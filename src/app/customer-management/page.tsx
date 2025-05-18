@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Trash, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Edit, Trash, Loader2, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AddCustomerDialog from "@/components/AddCustomer";
 import { useState, useEffect, useCallback } from "react";
@@ -100,7 +100,7 @@ export default function CustomerManagement() {
   
   // Pagination state
   const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(20);
+  const [limit] = useState(20);
   const [totalCustomers, setTotalCustomers] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
@@ -201,8 +201,16 @@ export default function CustomerManagement() {
   };
 
   useEffect(() => {
-    fetchCustomers();
-  }, [fetchCustomers]);
+    if (searchTerm) {
+      setPage(1);
+    }
+  }, [searchTerm]);
+
+  useEffect(() => {
+    if (page === 1) {
+      fetchCustomers(1);
+    }
+  }, [page, fetchCustomers]);
 
   const handleAddCustomer = () => {
     setSelectedCustomerId(null);
@@ -386,11 +394,8 @@ export default function CustomerManagement() {
     generateCustomerCode(customer.CustomerID).toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Reset to first page when search term changes
   useEffect(() => {
     if (searchTerm) {
-      // Only fetch from API if we're not searching locally
-      // For local search, we just filter the already loaded customers
     } else if (page !== 1) {
       fetchCustomers(1);
     }
