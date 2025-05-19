@@ -74,6 +74,29 @@ const PurchaseReportsTable = () => {
   });
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("ALL");
 
+  const adjustDateRange = (dateRange: DateRange | undefined): { 
+    startDate: string | undefined, 
+    endDate: string | undefined 
+  } => {
+    if (!dateRange || !dateRange.from || !dateRange.to) {
+      return { startDate: undefined, endDate: undefined };
+    }
+    
+    // Start date remains at beginning of day
+    const startDate = new Date(dateRange.from);
+    startDate.setHours(0, 0, 0, 0);
+    
+    // End date set to end of day (23:59:59.999)
+    const endDate = new Date(dateRange.to);
+    endDate.setHours(23, 59, 59, 999);
+    
+    return {
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString()
+    };
+  };
+
+  // Then modify your useEffect to use this function:
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
@@ -83,8 +106,6 @@ const PurchaseReportsTable = () => {
         const vendorsResponse = await axios.get(
           `${process.env.NEXT_PUBLIC_API_URL}/vendors?businessLineId=${businessLineId}`
         );
-
-        console.log('Vendors response:', vendorsResponse.data);
         
         const vendorsData = Array.isArray(vendorsResponse.data) 
           ? vendorsResponse.data 
@@ -92,12 +113,15 @@ const PurchaseReportsTable = () => {
           
         setVendors(vendorsData);
 
+        // Use the adjustDateRange helper
+        const { startDate, endDate } = adjustDateRange(filters.dateRange);
+
         const purchasesResponse = await axios.get(
           `${process.env.NEXT_PUBLIC_API_URL}/purchases/history/${businessLineId}`,
           {
             params: {
-              startDate: filters.dateRange?.from?.toISOString(),
-              endDate: filters.dateRange?.to?.toISOString()
+              startDate,
+              endDate
             }
           }
         );
@@ -111,60 +135,67 @@ const PurchaseReportsTable = () => {
     };
 
     fetchInitialData();
-  }, [getBusinessLineID, filters.dateRange?.from, filters.dateRange?.to]);  
+  }, [getBusinessLineID, filters.dateRange?.from, filters.dateRange?.to]);
 
-  const handleDownloadPDF = async (purchaseId: string) => {
+  const handleDownloadExcel = async (purchaseId: string) => {
     try {
       setError(null);
-      const url = `${process.env.NEXT_PUBLIC_API_URL}/purchases/report/${purchaseId}`;
-      console.log('Attempting download from:', url);
+      const url = `${process.env.NEXT_PUBLIC_API_URL}/purchases/report/${purchaseId}/excel`;
+      console.log('Attempting Excel download from:', url);
       const response = await axios.get(
-        `${process.env.NEXT_PUBLIC_API_URL}/purchases/report/${purchaseId}`,
+        url,
         { 
           responseType: 'blob',
           headers: {
-            Accept: 'application/pdf'
+            Accept: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
           },
           withCredentials: true
         }
       );
       
       const contentType = response.headers['content-type'];
-      if (contentType && contentType.indexOf('application/pdf') === -1) {
+      if (contentType && contentType.indexOf('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') === -1) {
         throw new Error('Received invalid file format');
       }
 
-      const blob = new Blob([response.data], { type: 'application/pdf' });
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
       
       if (blob.size === 0) {
         throw new Error('Received empty file');
       }
 
-      const blobUrl = window.URL.createObjectURL(blob);
-      window.open(blobUrl, '_blank');
-      setTimeout(() => {
-        window.URL.revokeObjectURL(blobUrl);
-      }, 100);
+      // Create download link
+      const downloadLink = document.createElement('a');
+      downloadLink.href = window.URL.createObjectURL(blob);
+      downloadLink.download = `Purchase_${purchaseId}.xlsx`;
+      document.body.appendChild(downloadLink);
+      downloadLink.click();
+      document.body.removeChild(downloadLink);
       
-      window.URL.revokeObjectURL(blobUrl);
+      // Clean up the URL object
+      setTimeout(() => {
+        window.URL.revokeObjectURL(downloadLink.href);
+      }, 100);
     } catch (error: unknown) {
-      console.error('Error downloading PDF:', error);
+      console.error('Error downloading Excel:', error);
       if (isAxiosError(error)) {
         if (error.response?.status === 404) {
-          setError('PDF report not found. Please try again later.');
+          setError('Excel report not found. Please try again later.');
         } else if (error.response?.status === 403) {
           setError('You do not have permission to download this report.');
         } else {
-          setError('Failed to download PDF. Please try again.');
+          setError('Failed to download Excel. Please try again.');
         }
       } else if (error instanceof Error) {
-        setError(error.message || 'Failed to download PDF. Please try again.');
+        setError(error.message || 'Failed to download Excel. Please try again.');
       } else {
-        setError('Failed to download PDF. Please try again.');
+        setError('Failed to download Excel. Please try again.');
       }
     }
   };
-
+  
   const formatCurrency = (amount: number) => {
     return `Rs. ${amount.toLocaleString(undefined, {
       minimumFractionDigits: 2,
@@ -390,7 +421,7 @@ const PurchaseReportsTable = () => {
                                   size="sm"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleDownloadPDF(purchase.PurchaseID);
+                                    handleDownloadExcel(purchase.PurchaseID);
                                   }}
                                   className="hover:bg-gray-100"
                                 >
