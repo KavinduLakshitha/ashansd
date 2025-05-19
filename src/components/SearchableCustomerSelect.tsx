@@ -30,22 +30,41 @@ export default function SearchableCustomerSelect({
   const [error, setError] = useState<string | null>(null);
   
   const { getBusinessLineID } = useAuth();
+  // Store businessLineId in a ref so we don't lose it between renders
+  const [businessLineId, setBusinessLineId] = useState<number | null>(null);
 
+  // First useEffect to get and set the business line ID
   useEffect(() => {
+    const id = getBusinessLineID();
+    console.log("Setting Business Line ID:", id);
+    setBusinessLineId(id);
+  }, [getBusinessLineID]);
+
+  // Second useEffect that only runs when businessLineId is available
+  useEffect(() => {
+    // Skip if businessLineId is not yet available
+    if (!businessLineId) {
+      console.log("Waiting for business line ID to be available...");
+      return;
+    }
+
     const fetchCustomers = async () => {
       try {
         setIsLoading(true);
         setError(null);
-        const businessLineId = getBusinessLineID();
+        
+        console.log("Fetching customers with Business Line ID:", businessLineId);
+        
         const token = localStorage.getItem('token');
 
         if (!token) {
           throw new Error('No authentication token found');
         }
 
+        // Now we're guaranteed to have a business line ID
         const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/customers`, {
           params: {
-            businessLineId
+            businessLineId: businessLineId
           },
           headers: {
             'Authorization': `Bearer ${token}`
@@ -72,8 +91,15 @@ export default function SearchableCustomerSelect({
           console.error('Unexpected API response format:', response.data);
           setError('Invalid data format received from server');
         }
-      } catch (err) {
-        setError('Failed to fetch customers');
+      } catch (err: unknown) {
+        let errorMessage = 'Failed to fetch customers';
+        if (typeof err === 'object' && err !== null && 'response' in err) {
+          const response = (err as { response?: { data?: { message?: string } } }).response;
+          if (response && response.data && response.data.message) {
+            errorMessage = response.data.message;
+          }
+        }
+        setError(errorMessage);
         console.error('Error fetching customers:', err);
       } finally {
         setIsLoading(false);
@@ -81,7 +107,7 @@ export default function SearchableCustomerSelect({
     };
 
     fetchCustomers();
-  }, [getBusinessLineID]);
+  }, [businessLineId]); // Only depends on businessLineId, not on getBusinessLineID
 
   useEffect(() => {
     setSelectedValue(value);

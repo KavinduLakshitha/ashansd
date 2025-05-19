@@ -14,8 +14,8 @@ import { DateRange } from "react-day-picker";
 import { addDays } from "date-fns";
 
 interface Vendor {
+  VendorName: string;
   VendorID: number;
-  Name: string;
 }
 
 interface PaymentDetails {
@@ -83,6 +83,8 @@ const PurchaseReportsTable = () => {
         const vendorsResponse = await axios.get(
           `${process.env.NEXT_PUBLIC_API_URL}/vendors?businessLineId=${businessLineId}`
         );
+
+        console.log('Vendors response:', vendorsResponse.data);
         
         const vendorsData = Array.isArray(vendorsResponse.data) 
           ? vendorsResponse.data 
@@ -300,7 +302,7 @@ const PurchaseReportsTable = () => {
                 <SelectContent>
                   {vendors.map((vendor) => (
                     <SelectItem key={`vendor-${vendor.VendorID}`} value={vendor.VendorID.toString()}>
-                      {vendor.Name}
+                      {vendor.VendorName}
                     </SelectItem>
                   ))}
                 </SelectContent>
