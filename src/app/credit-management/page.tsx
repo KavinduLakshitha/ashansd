@@ -57,10 +57,17 @@ const PaymentManagement = () => {
   const [processingIds, setProcessingIds] = useState<Set<string | number>>(new Set());
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>("all");
-  const [dateRange, setDateRange] = useState({
+  const [dueDateRange, setDueDateRange] = useState({
     from: new Date(new Date().setDate(new Date().getDate() - 30)),
     to: new Date()
-  }); 
+  });
+  
+  const [saleDateRange, setSaleDateRange] = useState({
+    from: new Date(new Date().setDate(new Date().getDate() - 30)),
+    to: new Date()
+  });
+  
+  const [activeDateFilter, setActiveDateFilter] = useState<'due' | 'sale'>('due');
 
   const fetchCustomers = useCallback(async () => {
     try {
@@ -82,8 +89,25 @@ const PaymentManagement = () => {
         if (selectedCustomer && selectedCustomer !== "all") {
             params.append('customerId', selectedCustomer);
         }
-        if (dateRange.from) params.append('startDate', format(dateRange.from, 'yyyy-MM-dd'));
-        if (dateRange.to) params.append('endDate', format(dateRange.to, 'yyyy-MM-dd'));
+        
+        // Use the appropriate date range based on active filter
+        const dateRange = activeDateFilter === 'due' ? dueDateRange : saleDateRange;
+        
+        if (dateRange.from) {
+          if (activeDateFilter === 'due') {
+            params.append('startDate', format(dateRange.from, 'yyyy-MM-dd'));
+          } else {
+            params.append('saleStartDate', format(dateRange.from, 'yyyy-MM-dd'));
+          }
+        }
+        
+        if (dateRange.to) {
+          if (activeDateFilter === 'due') {
+            params.append('endDate', format(dateRange.to, 'yyyy-MM-dd'));
+          } else {
+            params.append('saleEndDate', format(dateRange.to, 'yyyy-MM-dd'));
+          }
+        }
     
         const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/payments/pending/${businessLineId}?${params.toString()}`);
         setPendingPayments(response.data);
@@ -105,7 +129,7 @@ const PaymentManagement = () => {
        finally {
         setLoading(false);
       }
-    }, [selectedCustomer, dateRange, getBusinessLineID]);
+    }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, getBusinessLineID]);
     
     useEffect(() => {
       fetchCustomers();
@@ -258,40 +282,76 @@ const PaymentManagement = () => {
 
   return (
     <Card>
-      <CardHeader className="bg-gray-50 border-b border-gray-200 flex flex-row items-center justify-between">
+      <CardHeader className="bg-gray-50 border-b border-gray-200 flex flex-row items-start justify-between">
         <CardTitle className="text-xl font-semibold text-gray-800">
           Payment Management
         </CardTitle>
 
-        <div className="flex gap-4 items-center">
-        <Select
-          value={selectedCustomer}
-          onValueChange={setSelectedCustomer}
-        >
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Select Customer" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Customers</SelectItem>
-            {customers.map((customer) => (
-              <SelectItem 
-                key={customer.CustomerID} 
-                value={customer.CustomerID.toString()}
-              >
-                {customer.CustomerName}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex gap-4">
+          <Select
+            value={selectedCustomer}
+            onValueChange={setSelectedCustomer}
+          >
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder="Select Customer" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Customers</SelectItem>
+              {customers.map((customer) => (
+                <SelectItem 
+                  key={customer.CustomerID} 
+                  value={customer.CustomerID.toString()}
+                >
+                  {customer.CustomerName}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
 
-          <DatePickerWithRange
-              selected={dateRange}
-              onChange={(range) => {
-                if (range?.from && range?.to) {
-                  setDateRange({ from: range.from, to: range.to });
-                }
-              }}
-            />
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2 items-center">
+              <Button 
+                variant={activeDateFilter === 'due' ? "default" : "outline"}
+                onClick={() => setActiveDateFilter('due')}
+                className="text-xs px-2 py-1 h-auto"
+              >
+                Due Date Filter
+              </Button>
+              <Button 
+                variant={activeDateFilter === 'sale' ? "default" : "outline"}
+                onClick={() => setActiveDateFilter('sale')}
+                className="text-xs px-2 py-1 h-auto"
+              >
+                Sale Date Filter
+              </Button>
+            </div>
+            
+            {activeDateFilter === 'due' ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-sm text-gray-500">Payment Due/Realize Date Range</span>
+                <DatePickerWithRange
+                  selected={dueDateRange}
+                  onChange={(range) => {
+                    if (range?.from && range?.to) {
+                      setDueDateRange({ from: range.from, to: range.to });
+                    }
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="flex flex-col gap-1">
+                <span className="text-sm text-gray-500">Sale Date Range</span>
+                <DatePickerWithRange
+                  selected={saleDateRange}
+                  onChange={(range) => {
+                    if (range?.from && range?.to) {
+                      setSaleDateRange({ from: range.from, to: range.to });
+                    }
+                  }}
+                />
+              </div>
+            )}
+          </div>
         </div>
         
       </CardHeader>
