@@ -429,8 +429,7 @@ export default function CustomerManagement() {
               placeholder="Search by name or code" 
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-            />
-            <Button variant="secondary">Filters</Button>
+            />            
             <Button variant="default" onClick={handleAddCustomer}>
               New Customer
             </Button>

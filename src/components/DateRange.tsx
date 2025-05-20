@@ -1,6 +1,6 @@
 import React from "react";
 import { Calendar as CalendarIcon } from "lucide-react";
-import { DateRange } from "react-day-picker";
+import { DateRange as DayPickerDateRange } from "react-day-picker";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -11,14 +11,22 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
+// Define both DateRange types explicitly to avoid confusion
+interface ComponentDateRange {
+  from: Date | undefined;
+  to: Date | undefined;
+}
+
+// Use interface merging to make the props clearer
 interface DatePickerWithRangeProps {
   className?: string;
-  // Allow either selected/onChange or dateRange/onDateRangeChange pattern
-  selected?: DateRange | undefined;
-  onChange?: (dateRange: DateRange | undefined) => void;
-  dateRange?: DateRange | undefined;
-  onDateRangeChange?: (dateRange: DateRange | undefined) => void;
   placeholder?: string;
+  // First pattern
+  selected?: DayPickerDateRange | undefined;
+  onChange?: (dateRange: DayPickerDateRange | undefined) => void;
+  // Second pattern
+  dateRange?: ComponentDateRange;
+  onDateRangeChange?: (dateRange: ComponentDateRange | undefined) => void;
 }
 
 export function DatePickerWithRange({
@@ -30,12 +38,23 @@ export function DatePickerWithRange({
   placeholder = "Pick a date range"
 }: DatePickerWithRangeProps) {
   // Use whichever props are provided
-  const range = selected || dateRange;
-  const handleChange = onChange || onDateRangeChange;
-
-  if (!range || !handleChange) {
-    console.warn("DatePickerWithRange: Must provide either selected+onChange or dateRange+onDateRangeChange");
-  }
+  const handleCalendarSelect = (selectedRange: DayPickerDateRange | undefined) => {
+    // If using the onChange pattern
+    if (onChange) {
+      onChange(selectedRange);
+    }
+    // If using the onDateRangeChange pattern
+    else if (onDateRangeChange) {
+      // Convert from DayPickerDateRange to ComponentDateRange
+      onDateRangeChange(selectedRange ? {
+        from: selectedRange.from,
+        to: selectedRange.to
+      } : undefined);
+    }
+  };
+  
+  // Prepare the display range based on whichever input is provided
+  const displayRange = selected || dateRange;
 
   return (
     <div className={cn("grid gap-2", className)}>
@@ -46,18 +65,18 @@ export function DatePickerWithRange({
             variant="outline"
             className={cn(
               "w-full justify-start text-left font-normal",
-              !range?.from && "text-muted-foreground"
+              !displayRange?.from && "text-muted-foreground"
             )}
           >
             <CalendarIcon className="mr-2 h-4 w-4" />
-            {range?.from ? (
-              range.to ? (
+            {displayRange?.from ? (
+              displayRange.to ? (
                 <>
-                  {format(range.from, "LLL dd, y")} -{" "}
-                  {format(range.to, "LLL dd, y")}
+                  {format(displayRange.from, "LLL dd, y")} -{" "}
+                  {format(displayRange.to, "LLL dd, y")}
                 </>
               ) : (
-                format(range.from, "LLL dd, y")
+                format(displayRange.from, "LLL dd, y")
               )
             ) : (
               <span>{placeholder}</span>
@@ -68,9 +87,12 @@ export function DatePickerWithRange({
           <Calendar
             initialFocus
             mode="range"
-            defaultMonth={range?.from}
-            selected={range}
-            onSelect={handleChange}
+            defaultMonth={displayRange?.from}
+            selected={selected || (dateRange ? {
+              from: dateRange.from,
+              to: dateRange.to
+            } : undefined)}
+            onSelect={handleCalendarSelect}
             numberOfMonths={2}
           />
         </PopoverContent>

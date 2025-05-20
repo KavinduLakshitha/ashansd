@@ -7,6 +7,7 @@ import SalesTable from '@/components/SalesTable';
 import PurchaseReportsTable from '@/components/PurchaseReportsTable';
 import InventoryReport from '@/components/InventoryReport';
 import { useAuth } from '../auth/auth-context';
+import PaymentsHistory from '@/components/PaymentHistory';
 
 export default function Reports() {
     const [, setActiveTab] = useState("sales");
@@ -33,6 +34,9 @@ export default function Reports() {
                 </TabsContent>
                 <TabsContent value="inventory">
                   <InventoryReport businessLineId={businessLineId} />
+                </TabsContent>
+                <TabsContent value="payments">
+                    <PaymentsHistory />
                 </TabsContent>
             </Tabs>
         </Card>

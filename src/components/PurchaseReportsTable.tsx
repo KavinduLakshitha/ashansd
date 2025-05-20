@@ -135,7 +135,7 @@ const PurchaseReportsTable = () => {
     };
 
     fetchInitialData();
-  }, [getBusinessLineID, filters.dateRange?.from, filters.dateRange?.to]);
+  }, [getBusinessLineID, filters.dateRange]);
 
   const handleDownloadExcel = async (purchaseId: string) => {
     try {
