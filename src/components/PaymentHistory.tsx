@@ -101,7 +101,7 @@ const PaymentStatusHistory: React.FC = () => {
   }
   }, [getBusinessLineID, dateRange, setStatusChanges, setFilteredChanges, setLoading, toast]);
 
-  const filterStatusChanges = (): void => {
+  const filterStatusChanges = useCallback((): void => {
     let result = [...statusChanges];
     
     // Filter by customer
@@ -136,12 +136,16 @@ const PaymentStatusHistory: React.FC = () => {
     }
     
     setFilteredChanges(result);
-  };
+  }, [statusChanges, debouncedSearchTerm, selectedCustomerId, activeTab]);
 
   useEffect(() => { 
     fetchCustomers(); 
     fetchStatusChanges(); 
-  }, [fetchCustomers, fetchStatusChanges]);
+  }, []);
+
+  useEffect(() => { 
+    filterStatusChanges(); 
+  }, [filterStatusChanges]);
 
   useEffect(() => { 
     filterStatusChanges(); 

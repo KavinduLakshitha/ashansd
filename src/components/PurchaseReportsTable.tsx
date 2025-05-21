@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, ChevronRight, Download, FileText } from "lucide-react";
+import { ChevronDown, ChevronRight, FileDown, FileText } from "lucide-react";
 import { DateRange } from "react-day-picker";
 import { addDays } from "date-fns";
 
@@ -425,7 +425,7 @@ const PurchaseReportsTable = () => {
                                   }}
                                   className="hover:bg-gray-100"
                                 >
-                                  <Download className="h-4 w-4" />
+                                  <FileDown className="h-4 w-4" />
                                 </Button>
                               </TableCell>
                             </TableRow>
