@@ -55,16 +55,7 @@ const PaymentStatusHistory: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("all");
   
-  const debouncedSearchTerm = useDebounce(searchTerm, 300);
-
-  useEffect(() => {
-    fetchCustomers();
-    fetchStatusChanges();
-  }, []);
-
-  useEffect(() => {
-    filterStatusChanges();
-  }, [statusChanges, debouncedSearchTerm, selectedCustomerId, activeTab]);
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);  
 
   const fetchCustomers = useCallback(async (): Promise<void> => {
   try {
@@ -79,9 +70,9 @@ const PaymentStatusHistory: React.FC = () => {
       variant: "destructive",
     });
   }
-}, [getBusinessLineID, toast]);
+  }, [getBusinessLineID, toast]);
 
-const fetchStatusChanges = useCallback(async (): Promise<void> => {
+  const fetchStatusChanges = useCallback(async (): Promise<void> => {
   setLoading(true);
   try {
     const businessLineId = getBusinessLineID();
@@ -108,7 +99,7 @@ const fetchStatusChanges = useCallback(async (): Promise<void> => {
   } finally {
     setLoading(false);
   }
-}, [getBusinessLineID, dateRange, transformPaymentsToStatusChanges, setStatusChanges, setFilteredChanges, setLoading, toast]);
+  }, [getBusinessLineID, dateRange, setStatusChanges, setFilteredChanges, setLoading, toast]);
 
   const filterStatusChanges = (): void => {
     let result = [...statusChanges];
@@ -146,6 +137,15 @@ const fetchStatusChanges = useCallback(async (): Promise<void> => {
     
     setFilteredChanges(result);
   };
+
+  useEffect(() => { 
+    fetchCustomers(); 
+    fetchStatusChanges(); 
+  }, [fetchCustomers, fetchStatusChanges]);
+
+  useEffect(() => { 
+    filterStatusChanges(); 
+  }, [filterStatusChanges, statusChanges, debouncedSearchTerm, selectedCustomerId, activeTab]);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
     setSearchTerm(e.target.value);

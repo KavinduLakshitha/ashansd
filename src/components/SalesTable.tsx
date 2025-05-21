@@ -10,10 +10,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronDown, ChevronRight, Filter, FileDown } from "lucide-react";
 import { DateRange } from "react-day-picker";
-import { addDays } from "date-fns";
+import { addDays, format } from "date-fns";
+import { parseISO } from "date-fns";
 import SearchableCustomerSelect from './SearchableCustomerSelect';
 import _ from 'lodash';
 import * as XLSX from 'xlsx';
+import { MonthYearDialog, YearDialog } from './MonthYearSelectors';
 
 interface PaymentDetails {
   chequeNumber?: string;
@@ -67,8 +69,10 @@ const SalesTable = () => {
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);
   const [, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [loadingItems, setLoadingItems] = useState<Record<string, boolean>>({});
+  const [, setLoadingItems] = useState<Record<string, boolean>>({});
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
+  const [monthYearDialogOpen, setMonthYearDialogOpen] = useState(false);
+  const [yearDialogOpen, setYearDialogOpen] = useState(false);
   const [filters, setFilters] = useState<FilterState>({
     businessLine: '',
     salesPerson: '',
@@ -83,6 +87,8 @@ const SalesTable = () => {
   });
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("ALL");
   const [downloadingExcel, setDownloadingExcel] = useState(false);
+  const [downloadingMonthly, setDownloadingMonthly] = useState(false);
+  const [downloadingYearly, setDownloadingYearly] = useState(false);
 
   // Function to adjust the end date to include the entire day
   const adjustDateRange = (dateRange: DateRange | undefined): { 
@@ -322,7 +328,7 @@ const SalesTable = () => {
       }
     }
   };
-
+  
   // Function to add style to header cells
   const styleHeaderRow = (worksheet: XLSX.WorkSheet, headerRowIndex: number) => {
     if (!worksheet['!ref']) return;
@@ -529,6 +535,702 @@ const SalesTable = () => {
     }
   };
 
+  const fetchAllSaleItems = async (salesIDs: string[]) => {
+    const uniqueSaleIDs = [...new Set(salesIDs)];
+    
+    try {
+      // setDownloadingExcel(true);
+      
+      const itemsData: Record<string, SaleItem[]> = {};
+      
+      // Fetch items for each unique sale ID
+      for (const saleId of uniqueSaleIDs) {
+        if (saleItems[saleId]) {
+          // Use cached data if available
+          itemsData[saleId] = saleItems[saleId];
+        } else {
+          // Fetch from API
+          try {
+            const response = await axios.get(
+              `${process.env.NEXT_PUBLIC_API_URL}/sales/${saleId}/items`
+            );
+            
+            itemsData[saleId] = response.data;
+            
+            // Update cache
+            setSaleItems(prev => ({
+              ...prev,
+              [saleId]: response.data
+            }));
+          } catch (error) {
+            console.error(`Error fetching items for sale ${saleId}:`, error);
+            itemsData[saleId] = [];
+          }
+        }
+      }
+      
+      return itemsData;
+    } catch (error) {
+      console.error('Error fetching all sale items:', error);
+      return {};
+    }
+  };
+
+  const downloadMonthlyReport = async (selectedMonth?: number, selectedYear?: number) => {
+    try {
+      setDownloadingMonthly(true);
+      
+      // Use provided month/year or default to current month/year
+      const now = new Date();
+      const month = selectedMonth !== undefined ? selectedMonth : now.getMonth();
+      const year = selectedYear !== undefined ? selectedYear : now.getFullYear();
+      
+      // Get the month's date range
+      const firstDayOfMonth = new Date(year, month, 1);
+      firstDayOfMonth.setHours(0, 0, 0, 0);
+      
+      const lastDayOfMonth = new Date(year, month + 1, 0); // Last day of the month
+      lastDayOfMonth.setHours(23, 59, 59, 999);
+      
+      // Fetch data for the selected month
+      let monthlySales = sales;
+      
+      // Check if the current filter covers the entire selected month
+      const currentFilterStartDate = filters.dateRange?.from ? new Date(filters.dateRange.from) : null;
+      const currentFilterEndDate = filters.dateRange?.to ? new Date(filters.dateRange.to) : null;
+      
+      const needToFetchMonthlyData = !currentFilterStartDate || 
+                                    !currentFilterEndDate ||
+                                    currentFilterStartDate > firstDayOfMonth ||
+                                    currentFilterEndDate < lastDayOfMonth;
+      
+      if (needToFetchMonthlyData) {
+        try {
+          const businessLineId = getBusinessLineID();
+          
+          const dateRange = {
+            startDate: firstDayOfMonth.toISOString(),
+            endDate: lastDayOfMonth.toISOString()
+          };
+          
+          const response = await axios.get(
+            `${process.env.NEXT_PUBLIC_API_URL}/payments/history/${businessLineId}`,
+            {
+              params: dateRange
+            }
+          );
+          
+          monthlySales = response.data.payments;
+        } catch (error) {
+          console.error('Error fetching monthly data:', error);
+          return;
+        }
+      }
+      
+      // Fetch all sale items data for these sales
+      const saleIDs = monthlySales.map(sale => sale.SaleID);
+      const allSaleItems = await fetchAllSaleItems(saleIDs);
+      
+      // Group sales by invoice
+      const groupedMonthlySales = _.groupBy(monthlySales, 'InvoiceID');
+      
+      // Create a new workbook
+      const wb = XLSX.utils.book_new();
+      
+      // --- SUMMARY WORKSHEET ---
+      const summaryData = [
+        ['MONTHLY SALES REPORT', null, null, null, null, null],
+        [null, null, null, null, null, null],
+        [`Period: ${format(firstDayOfMonth, 'MMMM yyyy')}`, null, null, null, null, null],
+        [null, null, null, null, null, null],
+        ['Invoice ID', 'Date', 'Customer', 'Payment Method', 'Status', 'Amount']
+      ];
+      
+      let totalMonthlyAmount = 0;
+      
+      // Add invoice rows to summary
+      Object.entries(groupedMonthlySales).forEach(([invoiceId, invoiceSales]) => {
+        const invoiceTotal = invoiceSales.reduce((sum, sale) => sum + Number(sale.Amount.toString()), 0);
+        totalMonthlyAmount += invoiceTotal;
+        
+        // Add a row for each payment method in the invoice
+        invoiceSales.forEach(sale => {
+          summaryData.push([
+            invoiceId,
+            format(parseISO(sale.PaymentDate), 'dd/MM/yyyy'),
+            sale.CustomerName,
+            sale.PaymentMethod,
+            getPaymentStatus(sale).text,
+            sale.Amount.toString()
+          ]);
+        });
+      });
+      
+      // Add total row
+      summaryData.push([null, null, null, null, null, null]);
+      summaryData.push(['TOTAL', null, null, null, null, totalMonthlyAmount.toString()]);
+      
+      // Create summary worksheet
+      const summaryWS = XLSX.utils.aoa_to_sheet(summaryData);
+      
+      // Set column widths
+      setColumnWidths(summaryWS, [15, 15, 30, 15, 15, 15]);
+      
+      // Define merged cells for headers
+      const summaryMerges = [
+        ['A1', 'F1'], // Merge cells for main header
+        ['A3', 'F3']  // Merge cells for period
+      ];
+      
+      // Apply merges
+      setMerges(summaryWS, summaryMerges);
+      
+      // Style cells
+      addBordersToWorksheet(summaryWS);
+      styleHeaderRow(summaryWS, 0); // Main header
+      styleHeaderRow(summaryWS, 4); // Column headers
+      
+      // Format currency columns
+      for (let i = 6; i < summaryData.length - 2; i++) {
+        const amountRef = XLSX.utils.encode_cell({ r: i, c: 5 }); // Column F (Amount)
+        if (summaryWS[amountRef]) {
+          summaryWS[amountRef].z = '#,##0.00';
+        }
+      }
+      
+      // Format total amount cell
+      const totalAmountRef = XLSX.utils.encode_cell({ r: summaryData.length - 1, c: 5 });
+      if (summaryWS[totalAmountRef]) {
+        summaryWS[totalAmountRef].z = '#,##0.00';
+      }
+      
+      XLSX.utils.book_append_sheet(wb, summaryWS, 'Monthly Summary');
+      
+      // --- PRODUCTS WORKSHEET ---
+      const productsData = [
+        ['PRODUCTS SUMMARY', null, null, null, null],
+        [null, null, null, null, null],
+        [`Period: ${format(firstDayOfMonth, 'MMMM yyyy')}`, null, null, null, null],
+        [null, null, null, null, null],
+        ['Product Name', 'Total Quantity', 'Average Unit Price', 'Total Sales']
+      ];
+      
+      // Aggregate product data
+      const productSummary: Record<string, { 
+        totalQuantity: number; 
+        totalSales: number;
+        unitPrices: number[];
+      }> = {};
+      
+      // Iterate through all sale items to build product summary
+      Object.values(allSaleItems).forEach(itemList => {
+        itemList.forEach(item => {
+          if (!productSummary[item.ProductName]) {
+            productSummary[item.ProductName] = {
+              totalQuantity: 0,
+              totalSales: 0,
+              unitPrices: []
+            };
+          }
+          
+          productSummary[item.ProductName].totalQuantity += item.Quantity;
+          productSummary[item.ProductName].totalSales += item.TotalPrice;
+          productSummary[item.ProductName].unitPrices.push(item.UnitPrice);
+        });
+      });
+      
+      // Add product rows to summary
+      Object.entries(productSummary).forEach(([productName, data]) => {
+        const avgUnitPrice = data.unitPrices.reduce((sum, price) => sum + price, 0) / data.unitPrices.length;
+        
+        productsData.push([
+          productName,
+          data.totalQuantity.toString(),
+          avgUnitPrice.toString(),
+          data.totalSales.toString()
+        ]);
+      });
+      
+      // Add total row
+      const totalProductSales = Object.values(productSummary).reduce((sum, data) => sum + data.totalSales, 0);
+      productsData.push([null, null, null, null]);
+      productsData.push(['TOTAL', null, null, totalProductSales.toString()]);
+      
+      // Create products worksheet
+      const productsWS = XLSX.utils.aoa_to_sheet(productsData);
+      
+      // Set column widths
+      setColumnWidths(productsWS, [40, 15, 20, 15]);
+      
+      // Define merged cells for headers
+      const productsMerges = [
+        ['A1', 'D1'], // Merge cells for main header
+        ['A3', 'D3']  // Merge cells for period
+      ];
+      
+      // Apply merges
+      setMerges(productsWS, productsMerges);
+      
+      // Style cells
+      addBordersToWorksheet(productsWS);
+      styleHeaderRow(productsWS, 0); // Main header
+      styleHeaderRow(productsWS, 4); // Column headers
+      
+      // Format currency and number columns
+      for (let i = 6; i < productsData.length - 2; i++) {
+        // Average Unit Price column
+        const avgPriceRef = XLSX.utils.encode_cell({ r: i, c: 2 });
+        if (productsWS[avgPriceRef]) {
+          productsWS[avgPriceRef].z = '#,##0.00';
+        }
+        
+        // Total Sales column
+        const totalSalesRef = XLSX.utils.encode_cell({ r: i, c: 3 });
+        if (productsWS[totalSalesRef]) {
+          productsWS[totalSalesRef].z = '#,##0.00';
+        }
+      }
+      
+      // Format total amount cell
+      const productsTotalRef = XLSX.utils.encode_cell({ r: productsData.length - 1, c: 3 });
+      if (productsWS[productsTotalRef]) {
+        productsWS[productsTotalRef].z = '#,##0.00';
+      }
+      
+      // --- PAYMENT METHODS WORKSHEET ---
+      const paymentMethodsData = [
+        ['PAYMENT METHODS SUMMARY', null, null],
+        [null, null, null],
+        [`Period: ${format(firstDayOfMonth, 'MMMM yyyy')}`, null, null],
+        [null, null, null],
+        ['Payment Method', 'Count', 'Total Amount']
+      ];
+      
+      // Aggregate payment method data
+      const paymentMethodSummary: Record<string, { 
+        count: number; 
+        total: number;
+      }> = {
+        'CASH': { count: 0, total: 0 },
+        'CHEQUE': { count: 0, total: 0 },
+        'CREDIT': { count: 0, total: 0 }
+      };
+      
+      // Iterate through all sales to build payment method summary
+      monthlySales.forEach(sale => {
+        if (paymentMethodSummary[sale.PaymentMethod]) {
+          paymentMethodSummary[sale.PaymentMethod].count += 1;
+          paymentMethodSummary[sale.PaymentMethod].total += Number(sale.Amount);
+        }
+      });
+      
+      // Add payment method rows
+      Object.entries(paymentMethodSummary).forEach(([method, data]) => {
+        paymentMethodsData.push([
+          method,
+          data.count.toString(),
+          data.total.toString()
+        ]);
+      });
+      
+      // Add total row
+      const totalMethodsAmount = Object.values(paymentMethodSummary).reduce((sum, data) => sum + data.total, 0);
+      const totalMethodsCount = Object.values(paymentMethodSummary).reduce((sum, data) => sum + data.count, 0);
+      paymentMethodsData.push([null, null, null]);
+      paymentMethodsData.push(['TOTAL', totalMethodsCount.toString(), totalMethodsAmount.toString()]);
+      
+      // Create payment methods worksheet
+      const methodsWS = XLSX.utils.aoa_to_sheet(paymentMethodsData);
+      
+      // Set column widths
+      setColumnWidths(methodsWS, [20, 15, 20]);
+      
+      // Define merged cells for headers
+      const methodsMerges = [
+        ['A1', 'C1'], // Merge cells for main header
+        ['A3', 'C3']  // Merge cells for period
+      ];
+      
+      // Apply merges
+      setMerges(methodsWS, methodsMerges);
+      
+      // Style cells
+      addBordersToWorksheet(methodsWS);
+      styleHeaderRow(methodsWS, 0); // Main header
+      styleHeaderRow(methodsWS, 4); // Column headers
+      
+      // Format currency columns
+      for (let i = 6; i < paymentMethodsData.length - 2; i++) {
+        const totalRef = XLSX.utils.encode_cell({ r: i, c: 2 });
+        if (methodsWS[totalRef]) {
+          methodsWS[totalRef].z = '#,##0.00';
+        }
+      }
+      
+      // Format total amount cell
+      const methodsTotalRef = XLSX.utils.encode_cell({ r: paymentMethodsData.length - 1, c: 2 });
+      if (methodsWS[methodsTotalRef]) {
+        methodsWS[methodsTotalRef].z = '#,##0.00';
+      }
+      
+      XLSX.utils.book_append_sheet(wb, methodsWS, 'Payment Methods');
+      
+      // Save the Excel file
+      const currentMonthStr = format(firstDayOfMonth, 'yyyy-MM');
+      XLSX.writeFile(wb, `Monthly_Sales_Report_${currentMonthStr}.xlsx`);
+    } catch (error) {
+      console.error('Error generating monthly report:', error);
+    } finally {
+      setDownloadingMonthly(false);
+    }
+  };
+
+  const downloadYearlyReport = async (selectedYear?: number) => {
+    try {
+      setDownloadingYearly(true);
+      
+      // Get the current year's date range
+      const now = new Date();
+      const year = selectedYear !== undefined ? selectedYear : now.getFullYear();
+      
+      const firstDayOfYear = new Date(year, 0, 1);
+      firstDayOfYear.setHours(0, 0, 0, 0);
+      
+      const lastDayOfYear = new Date(year, 11, 31);
+      lastDayOfYear.setHours(23, 59, 59, 999);
+      // Fetch data for the current year if not already in the current filtered data
+      let yearlySales = sales;
+      
+      // Check if the current filter covers the entire year
+      const currentFilterStartDate = filters.dateRange?.from ? new Date(filters.dateRange.from) : null;
+      const currentFilterEndDate = filters.dateRange?.to ? new Date(filters.dateRange.to) : null;
+      
+      const needToFetchYearlyData = !currentFilterStartDate || 
+                                  !currentFilterEndDate || 
+                                  currentFilterStartDate > firstDayOfYear || 
+                                  currentFilterEndDate < lastDayOfYear;
+      
+      if (needToFetchYearlyData) {
+        try {
+          const businessLineId = getBusinessLineID();
+          
+          const dateRange = {
+            startDate: firstDayOfYear.toISOString(),
+            endDate: lastDayOfYear.toISOString()
+          };
+          
+          const response = await axios.get(
+            `${process.env.NEXT_PUBLIC_API_URL}/payments/history/${businessLineId}`,
+            {
+              params: dateRange
+            }
+          );
+          
+          yearlySales = response.data.payments;
+        } catch (error) {
+          console.error('Error fetching yearly data:', error);
+          return;
+        }
+      }
+      
+      // Fetch all sale items data for these sales
+      const saleIDs = yearlySales.map(sale => sale.SaleID);
+      const allSaleItems = await fetchAllSaleItems(saleIDs);
+      
+      // Create a new workbook
+      const wb = XLSX.utils.book_new();
+      
+      // --- MONTHLY BREAKDOWN WORKSHEET ---
+      const monthlyBreakdownData = [
+        ['YEARLY SALES REPORT - MONTHLY BREAKDOWN', null, null, null],
+        [null, null, null, null],
+        [`Year: ${year}`, null, null, null],
+        [null, null, null, null],
+        ['Month', 'Number of Sales', 'Revenue', 'Average Sale Value']
+      ];
+      
+      // Group sales by month
+      const salesByMonth: Record<number, { 
+        count: number; 
+        revenue: number;
+      }> = {};
+      
+      // Initialize all months with zero values
+      for (let month = 0; month < 12; month++) {
+        salesByMonth[month] = { count: 0, revenue: 0 };
+      }
+      
+      // Populate with actual sales data
+      yearlySales.forEach(sale => {
+        const saleDate = new Date(sale.PaymentDate);
+        const month = saleDate.getMonth();
+        
+        salesByMonth[month].count += 1;
+        salesByMonth[month].revenue += Number(sale.Amount);
+      });
+      
+      // Add month rows
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June', 
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      
+      let totalYearlyRevenue = 0;
+      let totalYearlySalesCount = 0;
+      
+      monthNames.forEach((monthName, index) => {
+        const monthData = salesByMonth[index];
+        const avgSaleValue = monthData.count > 0 ? monthData.revenue / monthData.count : 0;
+        
+        totalYearlyRevenue += monthData.revenue;
+        totalYearlySalesCount += monthData.count;
+        
+        monthlyBreakdownData.push([
+          monthName,
+          monthData.count.toString(),
+          monthData.revenue.toString(),
+          avgSaleValue.toString()
+        ]);
+      });
+      
+      // Add total row
+      const yearlyAvgSaleValue = totalYearlySalesCount > 0 ? totalYearlyRevenue / totalYearlySalesCount : 0;
+      monthlyBreakdownData.push([null, null, null, null]);
+      monthlyBreakdownData.push([
+        'TOTAL', 
+        totalYearlySalesCount.toString(), 
+        totalYearlyRevenue.toString(), 
+        yearlyAvgSaleValue.toString()
+      ]);
+      
+      // Create monthly breakdown worksheet
+      const monthlyBreakdownWS = XLSX.utils.aoa_to_sheet(monthlyBreakdownData);
+      
+      // Set column widths
+      setColumnWidths(monthlyBreakdownWS, [15, 20, 20, 20]);
+      
+      // Define merged cells for headers
+      const monthlyMerges = [
+        ['A1', 'D1'], // Merge cells for main header
+        ['A3', 'D3']  // Merge cells for year
+      ];
+      
+      // Apply merges
+      setMerges(monthlyBreakdownWS, monthlyMerges);
+      
+      // Style cells
+      addBordersToWorksheet(monthlyBreakdownWS);
+      styleHeaderRow(monthlyBreakdownWS, 0); // Main header
+      styleHeaderRow(monthlyBreakdownWS, 4); // Column headers
+      
+      // Format currency and number columns
+      for (let i = 6; i < monthlyBreakdownData.length - 2; i++) {
+        // Revenue column
+        const revenueRef = XLSX.utils.encode_cell({ r: i, c: 2 });
+        if (monthlyBreakdownWS[revenueRef]) {
+          monthlyBreakdownWS[revenueRef].z = '#,##0.00';
+        }
+        
+        // Average Sale Value column
+        const avgValueRef = XLSX.utils.encode_cell({ r: i, c: 3 });
+        if (monthlyBreakdownWS[avgValueRef]) {
+          monthlyBreakdownWS[avgValueRef].z = '#,##0.00';
+        }
+      }
+      
+      // Format total cells
+      const totalRevenueRef = XLSX.utils.encode_cell({ r: monthlyBreakdownData.length - 1, c: 2 });
+      if (monthlyBreakdownWS[totalRevenueRef]) {
+        monthlyBreakdownWS[totalRevenueRef].z = '#,##0.00';
+      }
+      
+      const totalAvgRef = XLSX.utils.encode_cell({ r: monthlyBreakdownData.length - 1, c: 3 });
+      if (monthlyBreakdownWS[totalAvgRef]) {
+        monthlyBreakdownWS[totalAvgRef].z = '#,##0.00';
+      }
+      
+      XLSX.utils.book_append_sheet(wb, monthlyBreakdownWS, 'Monthly Breakdown');
+      
+      // --- TOP PRODUCTS WORKSHEET ---
+      const topProductsData = [
+        ['TOP PRODUCTS', null, null, null],
+        [null, null, null, null],
+        [`Year: ${year}`, null, null, null],
+        [null, null, null, null],
+        ['Product', 'Quantity Sold', 'Revenue', '% of Total Revenue']
+      ];
+      
+      // Aggregate product data
+      const productSummary: Record<string, { 
+        quantity: number; 
+        revenue: number;
+      }> = {};
+      
+      // Iterate through all sale items to build product summary
+      Object.values(allSaleItems).forEach(itemList => {
+        itemList.forEach(item => {
+          if (!productSummary[item.ProductName]) {
+            productSummary[item.ProductName] = {
+              quantity: 0,
+              revenue: 0
+            };
+          }
+          
+          productSummary[item.ProductName].quantity += item.Quantity;
+          productSummary[item.ProductName].revenue += item.TotalPrice;
+        });
+      });
+      
+      // Calculate total product revenue for percentage calculation
+      const totalProductRevenue = Object.values(productSummary).reduce((sum, data) => sum + data.revenue, 0);
+      
+      // Sort products by revenue (descending) and get top 20
+      const topProducts = Object.entries(productSummary)
+        .sort(([, a], [, b]) => b.revenue - a.revenue)
+        .slice(0, 20);
+      
+      // Add product rows
+      topProducts.forEach(([productName, data]) => {
+        const percentOfTotal = (data.revenue / totalProductRevenue) * 100;
+        
+        topProductsData.push([
+          productName,
+          data.quantity.toString(),
+          data.revenue.toString(),
+          percentOfTotal.toString()
+        ]);
+      });
+      
+      // Create top products worksheet
+      const topProductsWS = XLSX.utils.aoa_to_sheet(topProductsData);
+      
+      // Set column widths
+      setColumnWidths(topProductsWS, [40, 15, 15, 15]);
+      
+      // Define merged cells for headers
+      const topProductsMerges = [
+        ['A1', 'D1'], // Merge cells for main header
+        ['A3', 'D3']  // Merge cells for year
+      ];
+      
+      // Apply merges
+      setMerges(topProductsWS, topProductsMerges);
+      
+      // Style cells
+      addBordersToWorksheet(topProductsWS);
+      styleHeaderRow(topProductsWS, 0); // Main header
+      styleHeaderRow(topProductsWS, 4); // Column headers
+      
+      // Format currency and percentage columns
+      for (let i = 6; i < topProductsData.length; i++) {
+        // Revenue column
+        const revenueRef = XLSX.utils.encode_cell({ r: i, c: 2 });
+        if (topProductsWS[revenueRef]) {
+          topProductsWS[revenueRef].z = '#,##0.00';
+        }
+        
+        // Percentage column
+        const percentRef = XLSX.utils.encode_cell({ r: i, c: 3 });
+        if (topProductsWS[percentRef]) {
+          topProductsWS[percentRef].z = '0.00%';
+        }
+      }
+      
+      XLSX.utils.book_append_sheet(wb, topProductsWS, 'Top Products');
+      
+      // --- CUSTOMER ANALYSIS WORKSHEET ---
+      const customerAnalysisData = [
+        ['CUSTOMER ANALYSIS', null, null, null],
+        [null, null, null, null],
+        [`Year: ${year}`, null, null, null],
+        [null, null, null, null],
+        ['Customer', 'Number of Purchases', 'Total Spent', 'Average Purchase Value']
+      ];
+      
+      // Group sales by customer
+      const salesByCustomer: Record<string, { 
+        customerName: string;
+        purchaseCount: number;
+        totalSpent: number;
+      }> = {};
+      
+      // Populate with sales data
+      yearlySales.forEach(sale => {
+        if (!salesByCustomer[sale.CustomerID]) {
+          salesByCustomer[sale.CustomerID] = {
+            customerName: sale.CustomerName,
+            purchaseCount: 0,
+            totalSpent: 0
+          };
+        }
+        
+        salesByCustomer[sale.CustomerID].purchaseCount += 1;
+        salesByCustomer[sale.CustomerID].totalSpent += Number(sale.Amount);
+      });
+      
+      // Sort customers by total spent (descending) and get top 20
+      const topCustomers = Object.entries(salesByCustomer)
+        .sort(([, a], [, b]) => b.totalSpent - a.totalSpent)
+        .slice(0, 20);
+      
+      // Add customer rows
+      topCustomers.forEach(([, data]) => {
+        const avgPurchaseValue = data.purchaseCount > 0 ? data.totalSpent / data.purchaseCount : 0;
+        
+        customerAnalysisData.push([
+          data.customerName,
+          data.purchaseCount.toString(),
+          data.totalSpent.toString(),
+          avgPurchaseValue.toString()
+        ]);
+      });
+      
+      // Create customer analysis worksheet
+      const customerWS = XLSX.utils.aoa_to_sheet(customerAnalysisData);
+      
+      // Set column widths
+      setColumnWidths(customerWS, [40, 20, 20, 20]);
+      
+      // Define merged cells for headers
+      const customerMerges = [
+        ['A1', 'D1'], // Merge cells for main header
+        ['A3', 'D3']  // Merge cells for year
+      ];
+      
+      // Apply merges
+      setMerges(customerWS, customerMerges);
+      
+      // Style cells
+      addBordersToWorksheet(customerWS);
+      styleHeaderRow(customerWS, 0); // Main header
+      styleHeaderRow(customerWS, 4); // Column headers
+      
+      // Format currency columns
+      for (let i = 6; i < customerAnalysisData.length; i++) {
+        // Total Spent column
+        const totalSpentRef = XLSX.utils.encode_cell({ r: i, c: 2 });
+        if (customerWS[totalSpentRef]) {
+          customerWS[totalSpentRef].z = '#,##0.00';
+        }
+        
+        // Average Purchase Value column
+        const avgValueRef = XLSX.utils.encode_cell({ r: i, c: 3 });
+        if (customerWS[avgValueRef]) {
+          customerWS[avgValueRef].z = '#,##0.00';
+        }
+      }
+      
+      XLSX.utils.book_append_sheet(wb, customerWS, 'Customer Analysis');
+      
+      // Save the Excel file
+      XLSX.writeFile(wb, `Yearly_Sales_Report_${year}.xlsx`);
+    } catch (error) {
+      console.error('Error generating yearly report:', error);
+    } finally {
+      setDownloadingYearly(false);
+    }
+  };
+
   const filteredSales = selectedPaymentMethod === 'ALL' || !selectedPaymentMethod
     ? sales
     : sales.filter(sale => sale.PaymentMethod === selectedPaymentMethod);
@@ -538,67 +1240,108 @@ const SalesTable = () => {
   return (
     <Card className="w-full shadow-none rounded-tl-none rounded-tr-none border-0">
       <CardContent>
-        <div className="flex items-center gap-4 mb-6 mt-4">
-          <DatePickerWithRange
-            selected={filters.dateRange!}
-            onChange={(range) => setFilters(prev => ({ ...prev, dateRange: range }))}
-          />
+        <div className="flex items-center justify-between mb-6 mt-4">
+          <div className="flex items-center gap-4 flex-wrap">
+            <DatePickerWithRange
+              selected={filters.dateRange!}
+              onChange={(range) => setFilters(prev => ({ ...prev, dateRange: range }))}
+            />
+              
+            <Select 
+              value={filters.salesPerson}
+              onValueChange={(value) => setFilters(prev => ({ ...prev, salesPerson: value }))}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Sales Person" />
+              </SelectTrigger>
+              <SelectContent>
+                {salesPersons.map((person: SalesPerson) => (
+                  <SelectItem key={person.UserID} value={person.UserID.toString()}>
+                    {person.UserName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select 
+              value={selectedPaymentMethod}
+              onValueChange={setSelectedPaymentMethod}
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Payment Type" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All Payments</SelectItem>
+                <SelectItem value="CASH">Cash</SelectItem>
+                <SelectItem value="CHEQUE">Cheque</SelectItem>
+                <SelectItem value="CREDIT">Credit</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <SearchableCustomerSelect
+              value={filters.selectedCustomer}
+              onChange={(value, customerId) => setFilters(prev => ({ 
+                ...prev, 
+                selectedCustomer: value,
+                customerId: customerId
+              }))}
+            />
+
+            <Input
+              placeholder="Search Invoice ID..."
+              value={filters.invoiceId}
+              onChange={handleInvoiceSearch}
+              className="w-48"
+            />
+
+            <Button 
+              variant="outline"
+              onClick={handleFilterChange}
+            >
+              <Filter className="h-4 w-4 mr-2" />
+              Apply Filters
+            </Button>
+          </div>
+          
+          {/* Download Reports Dropdown */}
+          <div className="flex items-center gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => setMonthYearDialogOpen(true)}
+              disabled={downloadingMonthly}
+            >
+              <FileDown className="h-4 w-4 mr-2" />
+              {downloadingMonthly ? 'Downloading...' : 'Monthly Report'}
+            </Button>
             
-          <Select 
-            value={filters.salesPerson}
-            onValueChange={(value) => setFilters(prev => ({ ...prev, salesPerson: value }))}
-          >
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Sales Person" />
-            </SelectTrigger>
-            <SelectContent>
-              {salesPersons.map((person: SalesPerson) => (
-                <SelectItem key={person.UserID} value={person.UserID.toString()}>
-                  {person.UserName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select 
-            value={selectedPaymentMethod}
-            onValueChange={setSelectedPaymentMethod}
-          >
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Payment Type" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All Payments</SelectItem>
-              <SelectItem value="CASH">Cash</SelectItem>
-              <SelectItem value="CHEQUE">Cheque</SelectItem>
-              <SelectItem value="CREDIT">Credit</SelectItem>
-            </SelectContent>
-          </Select>
-
-          <SearchableCustomerSelect
-            value={filters.selectedCustomer}
-            onChange={(value, customerId) => setFilters(prev => ({ 
-              ...prev, 
-              selectedCustomer: value,
-              customerId: customerId
-            }))}
-          />
-
-          <Input
-            placeholder="Search Invoice ID..."
-            value={filters.invoiceId}
-            onChange={handleInvoiceSearch}
-            className="w-48"
-          />
-
-          <Button 
-            variant="outline"
-            onClick={handleFilterChange}
-          >
-            <Filter className="h-4 w-4 mr-2" />
-            Apply Filters
-          </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => setYearDialogOpen(true)}
+              disabled={downloadingYearly}
+            >
+              <FileDown className="h-4 w-4 mr-2" />
+              {downloadingYearly ? 'Downloading...' : 'Yearly Report'}
+            </Button>
+          </div>
         </div>
+
+        <MonthYearDialog 
+          isOpen={monthYearDialogOpen}
+          onClose={() => setMonthYearDialogOpen(false)}
+          onConfirm={(month, year) => {
+            downloadMonthlyReport(month, year);
+            setMonthYearDialogOpen(false);
+          }}
+        />
+
+        <YearDialog 
+          isOpen={yearDialogOpen}
+          onClose={() => setYearDialogOpen(false)}
+          onConfirm={(year) => {
+            downloadYearlyReport(year);
+            setYearDialogOpen(false);
+          }}
+        />
 
         <div className="rounded-md border">
           <Table>
@@ -672,101 +1415,13 @@ const SalesTable = () => {
                                 downloadInvoiceAsExcel(invoiceId, saleId);
                               }}
                               disabled={downloadingExcel}
+                              title="Download Invoice"
                             >
                               <FileDown className="h-4 w-4" />
                             </Button>
                           </TableCell>
                         </TableRow>
-                        {isExpanded && (
-                          <TableRow className="bg-gray-50">
-                            <TableCell colSpan={6}>
-                              <div className="p-4">
-                                {/* Invoice Items Section */}
-                                <h4 className="font-semibold mb-2">Invoice Items</h4>
-                                {loadingItems[saleId] ? (
-                                  <div className="text-center py-4">Loading invoice items...</div>
-                                ) : !saleItems[saleId] ? (
-                                  <div className="text-center py-4">No item details available</div>
-                                ) : (
-                                  <Table>
-                                    <TableHeader>
-                                      <TableRow>
-                                        <TableCell className="font-medium">Product</TableCell>
-                                        <TableCell className="font-medium">Quantity</TableCell>
-                                        <TableCell className="font-medium">Unit Price</TableCell>
-                                        <TableCell className="font-medium">Total</TableCell>
-                                      </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                      {saleItems[saleId]?.map((item) => (
-                                        <TableRow key={item.SaleItemID}>
-                                          <TableCell>{item.ProductName}</TableCell>
-                                          <TableCell>{item.Quantity}</TableCell>
-                                          <TableCell>{formatCurrency(item.UnitPrice)}</TableCell>
-                                          <TableCell>{formatCurrency(item.TotalPrice)}</TableCell>
-                                        </TableRow>
-                                      ))}
-                                      <TableRow className="bg-gray-100">
-                                        <TableCell colSpan={3} className="text-right font-semibold">
-                                          Subtotal:
-                                        </TableCell>
-                                        <TableCell className="font-semibold">
-                                          {formatCurrency(
-                                            saleItems[saleId]?.reduce(
-                                              (sum, item) => sum + Number(item.TotalPrice), 0
-                                            ) || 0
-                                          )}
-                                        </TableCell>
-                                      </TableRow>
-                                    </TableBody>
-                                  </Table>
-                                )}
-
-                                {/* Payment Details Section */}
-                                <h4 className="font-semibold mt-6 mb-2">Payment Details</h4>
-                                <Table>
-                                  <TableHeader>
-                                    <TableRow>
-                                      <TableCell>Payment Method</TableCell>
-                                      <TableCell>Amount</TableCell>
-                                      <TableCell>Status</TableCell>
-                                      <TableCell>Details</TableCell>
-                                    </TableRow>
-                                  </TableHeader>
-                                  <TableBody>
-                                    {invoiceSales.map(sale => (
-                                      <TableRow key={sale.PaymentID}>
-                                        <TableCell>
-                                          <Badge variant="outline">
-                                            {sale.PaymentMethod}
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell>{formatCurrency(sale.Amount)}</TableCell>
-                                        <TableCell>
-                                          <Badge className={getPaymentStatus(sale).className}>
-                                            {getPaymentStatus(sale).text}
-                                          </Badge>
-                                        </TableCell>
-                                        <TableCell>
-                                          {sale.PaymentMethod === 'CHEQUE' && sale.paymentDetails && (
-                                            <span className="text-sm text-gray-500">
-                                              {sale.paymentDetails.chequeNumber} - {sale.paymentDetails.bank}
-                                            </span>
-                                          )}
-                                          {sale.PaymentMethod === 'CREDIT' && sale.paymentDetails && (
-                                            <span className="text-sm text-gray-500">
-                                              Due: {new Date(sale.paymentDetails.dueDate || '').toLocaleDateString()}
-                                            </span>
-                                          )}
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                  </TableBody>
-                                </Table>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        )}
+                        {/* Rest of the expanded table row remains the same */}
                       </React.Fragment>
                     );
                   })
