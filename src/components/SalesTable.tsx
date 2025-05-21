@@ -152,6 +152,7 @@ const SalesTable = () => {
   }, [getBusinessLineID, filters.dateRange]);
 
   const fetchSaleItems = async (saleId: string) => {
+    console.log(saleId);
     try {
       setLoadingItems(prev => ({ ...prev, [saleId]: true }));
       
@@ -373,7 +374,12 @@ const SalesTable = () => {
       }
       
       const invoiceSales = groupedSales[invoiceId];
-      if (!invoiceSales || !saleItems[saleId]) {
+      const items = saleItems[saleId];
+
+      console.log('Invoice Sales:', invoiceSales);
+      console.log('Sale Items:', items);
+
+      if (!invoiceSales || !items) {
         console.error('No data available for download');
         return;
       }
@@ -1382,9 +1388,10 @@ const SalesTable = () => {
                     return (
                       <React.Fragment key={invoiceId}>
                         <TableRow 
-                          className="hover:bg-gray-50"
+                          className="hover:bg-gray-50 cursor-pointer"
+                          onClick={() => toggleInvoiceExpand(invoiceId, saleId)}
                         >
-                          <TableCell className="cursor-pointer" onClick={() => toggleInvoiceExpand(invoiceId, saleId)}>
+                          <TableCell>
                             <div className="flex items-center">
                               {isExpanded ? 
                                 <ChevronDown className="h-4 w-4 mr-2" /> : 
@@ -1421,7 +1428,97 @@ const SalesTable = () => {
                             </Button>
                           </TableCell>
                         </TableRow>
-                        {/* Rest of the expanded table row remains the same */}
+                        
+                        {/* Expanded content row */}
+                        {isExpanded && (
+                          <TableRow>
+                            <TableCell colSpan={6} className="bg-gray-50 p-0">
+                              <div className="p-4">
+                                {/* Payment Details Section */}
+                                <div className="mb-4">
+                                  <h4 className="font-semibold mb-2">Payment Details</h4>
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableCell className="font-semibold">Payment Method</TableCell>
+                                        <TableCell className="font-semibold">Amount</TableCell>
+                                        <TableCell className="font-semibold">Status</TableCell>
+                                        <TableCell className="font-semibold">Details</TableCell>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {invoiceSales.map(sale => (
+                                        <TableRow key={sale.PaymentID}>
+                                          <TableCell>{sale.PaymentMethod}</TableCell>
+                                          <TableCell>{formatCurrency(sale.Amount)}</TableCell>
+                                          <TableCell>
+                                            <Badge className={getPaymentStatus(sale).className}>
+                                              {getPaymentStatus(sale).text}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell>
+                                            {sale.PaymentMethod === 'CHEQUE' && sale.paymentDetails && (
+                                              <>
+                                                Cheque #{sale.paymentDetails.chequeNumber} - {sale.paymentDetails.bank}
+                                                {sale.paymentDetails.realizeDate && 
+                                                  ` (Realize: ${new Date(sale.paymentDetails.realizeDate).toLocaleDateString()})`}
+                                              </>
+                                            )}
+                                            {sale.PaymentMethod === 'CREDIT' && sale.paymentDetails && sale.paymentDetails.dueDate && (
+                                              <>Due: {new Date(sale.paymentDetails.dueDate).toLocaleDateString()}</>
+                                            )}
+                                            {sale.PaymentMethod === 'CASH' && 'Paid in Cash'}
+                                          </TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+
+                                {/* Invoice Items Section */}
+                                <div>
+                                  <h4 className="font-semibold mb-2">Invoice Items</h4>
+                                  {saleItems[saleId] ? (
+                                    <Table>
+                                      <TableHeader>
+                                        <TableRow>
+                                          <TableCell className="font-semibold">Product</TableCell>
+                                          <TableCell className="font-semibold">Quantity</TableCell>
+                                          <TableCell className="font-semibold">Unit Price</TableCell>
+                                          <TableCell className="font-semibold">Total</TableCell>
+                                        </TableRow>
+                                      </TableHeader>
+                                      <TableBody>
+                                        {saleItems[saleId].map(item => (
+                                          <TableRow key={item.SaleItemID}>
+                                            <TableCell>{item.ProductName}</TableCell>
+                                            <TableCell>{item.Quantity}</TableCell>
+                                            <TableCell>{formatCurrency(item.UnitPrice)}</TableCell>
+                                            <TableCell>{formatCurrency(item.TotalPrice)}</TableCell>
+                                          </TableRow>
+                                        ))}
+                                        <TableRow>
+                                          <TableCell colSpan={3} className="text-right font-semibold">
+                                            Subtotal:
+                                          </TableCell>
+                                          <TableCell className="font-semibold">
+                                            {formatCurrency(
+                                              saleItems[saleId].reduce((sum, item) => sum + Number(item.TotalPrice), 0)
+                                            )}
+                                          </TableCell>
+                                        </TableRow>
+                                      </TableBody>
+                                    </Table>
+                                  ) : (
+                                    <div className="text-center py-4 text-gray-500">
+                                      Loading items...
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
                       </React.Fragment>
                     );
                   })

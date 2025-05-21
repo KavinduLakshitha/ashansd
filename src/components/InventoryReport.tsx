@@ -11,6 +11,9 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import * as XLSX from 'xlsx';
+import { MonthYearDialog, YearDialog } from './MonthYearSelectors';
+import { useToast } from '@/hooks/use-toast';
 
 // Interfaces
 interface Product {
@@ -74,6 +77,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
   initialDate = new Date()
 }) => {
   // State management
+  const { toast } = useToast();
   const [asOfDate, setAsOfDate] = useState<Date>(initialDate);
   const [dateOpen, setDateOpen] = useState<boolean>(false);
   const [products, setProducts] = useState<Product[]>([]);
@@ -97,6 +101,11 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
   const [lowStockItems, setLowStockItems] = useState<number>(0);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [monthYearDialogOpen, setMonthYearDialogOpen] = useState(false);
+  const [yearDialogOpen, setYearDialogOpen] = useState(false);
+  const [downloadingMonthly, setDownloadingMonthly] = useState(false);
+  const [downloadingYearly, setDownloadingYearly] = useState(false);
+  const [downloadingCurrent, setDownloadingCurrent] = useState(false);
 
   const handleDateSelect = (date: Date | undefined) => {
     if (!date) return;    
@@ -265,10 +274,665 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
   const filteredProducts = products.filter(product => 
     product.Name.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  
-  const exportToPDF = () => {
-    alert('Exporting to PDF...');
+
+  // Helper functions for Excel generation
+  const setColumnWidths = (worksheet: XLSX.WorkSheet, widths: number[]) => {
+    worksheet['!cols'] = widths.map((width) => ({ wch: width }));
   };
+
+  const setMerges = (worksheet: XLSX.WorkSheet, merges: string[][] | [string, string][]) => {
+    worksheet['!merges'] = merges.map(([startCell, endCell]) => {
+      const start = XLSX.utils.decode_cell(startCell);
+      const end = XLSX.utils.decode_cell(endCell);
+      return { s: { r: start.r, c: start.c }, e: { r: end.r, c: end.c } };
+    });
+  };
+
+  const addBordersToWorksheet = (worksheet: XLSX.WorkSheet) => {
+    if (!worksheet['!ref']) return;
+    
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    
+    for (let row = range.s.r; row <= range.e.r; row++) {
+      for (let col = range.s.c; col <= range.e.c; col++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: row, c: col });
+        
+        if (!worksheet[cellAddress]) {
+          worksheet[cellAddress] = { t: 's', v: '' };
+        }
+        
+        if (!worksheet[cellAddress].s) worksheet[cellAddress].s = {};
+        
+        worksheet[cellAddress].s = {
+          ...worksheet[cellAddress].s,
+          border: {
+            top: { style: 'thin', color: { rgb: "000000" } },
+            bottom: { style: 'thin', color: { rgb: "000000" } },
+            left: { style: 'thin', color: { rgb: "000000" } },
+            right: { style: 'thin', color: { rgb: "000000" } }
+          }
+        };
+      }
+    }
+  };
+  
+  const styleHeaderRow = (worksheet: XLSX.WorkSheet, headerRowIndex: number) => {
+    if (!worksheet['!ref']) return;
+    
+    const range = XLSX.utils.decode_range(worksheet['!ref']);
+    
+    for (let col = range.s.c; col <= range.e.c; col++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: headerRowIndex, c: col });
+      
+      if (!worksheet[cellAddress]) {
+        worksheet[cellAddress] = { t: 's', v: '' };
+      }
+      
+      if (!worksheet[cellAddress].s) worksheet[cellAddress].s = {};
+      
+      worksheet[cellAddress].s = {
+        ...worksheet[cellAddress].s,
+        font: { bold: true },
+        fill: { 
+          patternType: 'solid', 
+          fgColor: { rgb: "E9ECEF" }
+        },
+        border: {
+          top: { style: 'thin', color: { rgb: "000000" } },
+          bottom: { style: 'thin', color: { rgb: "000000" } },
+          left: { style: 'thin', color: { rgb: "000000" } },
+          right: { style: 'thin', color: { rgb: "000000" } }
+        }
+      };
+    }
+  };
+
+  const exportCurrentInventory = async () => {
+    try {
+      setDownloadingCurrent(true);
+      
+      const wb = XLSX.utils.book_new();
+      
+      // Current Inventory Sheet
+      const inventoryData = [
+        ['CURRENT INVENTORY REPORT', null, null, null, null, null, null],
+        [null, null, null, null, null, null, null],
+        [`As of: ${format(asOfDate, 'PPP')}`, null, null, null, null, null, null],
+        [`Generated on: ${format(new Date(), 'yyyy-MM-dd HH:mm')}`, null, null, null, null, null, null],
+        [null, null, null, null, null, null, null],
+        ['ID', 'Product', 'Current Qty', 'Min Qty', 'Status', 'Value', 'Last Updated']
+      ];
+      
+      let totalValue = 0;
+      filteredProducts.forEach(product => {
+        const value = product.Value || product.CurrentQTY * (product.AverageCost || 0);
+        totalValue += value;
+        
+        inventoryData.push([
+          product.ProductID.toString(),
+          product.Name,
+          product.CurrentQTY.toString(),
+          (product.MinimumQTY || 0).toString(),
+          product.Status || (product.CurrentQTY === 0 ? 'Out of Stock' : 
+            product.CurrentQTY < (product.MinimumQTY || 0) ? 'Low Stock' : 'In Stock'),
+          value.toString(),
+          product.LastUpdated ? format(new Date(product.LastUpdated), 'MMM d, yyyy') : 'N/A'
+        ]);
+      });
+      
+      inventoryData.push([null, null, null, null, null, null, null]);
+      inventoryData.push(['SUMMARY', null, null, null, null, null, null]);
+      inventoryData.push([`Total Items: ${filteredProducts.length}`, null, null, null, null, null, null]);
+      inventoryData.push([`Low Stock Items: ${lowStockItems}`, null, null, null, null, null, null]);
+      inventoryData.push([`Total Value: LKR ${totalValue.toFixed(2)}`, null, null, null, null, null, null]);
+      
+      const ws = XLSX.utils.aoa_to_sheet(inventoryData);
+      
+      setColumnWidths(ws, [10, 40, 12, 10, 15, 15, 15]);
+      
+      const merges = [
+        ['A1', 'G1'], // Title
+        ['A3', 'G3'], // As of date
+        ['A4', 'G4'], // Generated date
+        ['A9', 'G9'], // Summary
+        ['A10', 'G10'], // Total items
+        ['A11', 'G11'], // Low stock
+        ['A12', 'G12']  // Total value
+      ];
+      setMerges(ws, merges);
+      
+      addBordersToWorksheet(ws);
+      styleHeaderRow(ws, 0);
+      styleHeaderRow(ws, 5);
+      styleHeaderRow(ws, 8);
+      
+      // Format currency columns
+      for (let i = 7; i < inventoryData.length - 5; i++) {
+        const valueRef = XLSX.utils.encode_cell({ r: i, c: 5 });
+        if (ws[valueRef]) {
+          ws[valueRef].z = '#,##0.00';
+        }
+      }
+      
+      XLSX.utils.book_append_sheet(wb, ws, 'Current_Inventory');
+      
+      // Movement History Sheet (if movements loaded)
+      if (movements.length > 0) {
+        const movementData = [
+          ['MOVEMENT HISTORY', null, null, null, null, null, null, null],
+          [null, null, null, null, null, null, null, null],
+          [`From: ${format(startDate, 'PPP')} To: ${format(endDate, 'PPP')}`, null, null, null, null, null, null, null],
+          [null, null, null, null, null, null, null, null],
+          ['Date & Time', 'Product', 'Type', 'Reference', 'Quantity', 'Direction', 'User', 'Details']
+        ];
+        
+        movements.forEach(movement => {
+          const product = products.find(p => p.ProductID === movement.ProductID);
+          let details = '';
+          
+          if (movement.details?.vendor) details += `Vendor: ${movement.details.vendor} `;
+          if (movement.details?.customer) details += `Customer: ${movement.details.customer} `;
+          if (movement.details?.invoiceNumber) details += `Invoice: ${movement.details.invoiceNumber} `;
+          if (movement.Note) details += movement.Note;
+          
+          movementData.push([
+            format(new Date(movement.Date), 'MMM d, yyyy h:mm a'),
+            movement.ProductName || product?.Name || `Product ID: ${movement.ProductID}`,
+            getMovementTypeLabel(movement),
+            getMovementReference(movement),
+            movement.Quantity.toString(),
+            movement.Direction,
+            movement.CreatedBy,
+            details.trim() || '-'
+          ]);
+        });
+        
+        const movementWs = XLSX.utils.aoa_to_sheet(movementData);
+        
+        setColumnWidths(movementWs, [20, 30, 15, 15, 10, 10, 15, 40]);
+        
+        const movementMerges = [
+          ['A1', 'H1'],
+          ['A3', 'H3']
+        ];
+        setMerges(movementWs, movementMerges);
+        
+        addBordersToWorksheet(movementWs);
+        styleHeaderRow(movementWs, 0);
+        styleHeaderRow(movementWs, 4);
+        
+        XLSX.utils.book_append_sheet(wb, movementWs, 'Movement History');
+      }
+      
+      const fileName = `Inventory_Report_${format(asOfDate, 'yyyy-MM-dd')}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+      
+      toast({
+        title: "Export Complete",
+        description: `Downloaded ${fileName}`,
+      });
+    } catch (error) {
+      console.error('Error exporting inventory:', error);
+      toast({
+        title: "Export Failed",
+        description: "Failed to export inventory data. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadingCurrent(false);
+    }
+  };
+
+  const downloadMonthlyReport = async (selectedMonth?: number, selectedYear?: number) => {
+    try {
+      setDownloadingMonthly(true);
+      
+      const now = new Date();
+      const month = selectedMonth !== undefined ? selectedMonth : now.getMonth();
+      const year = selectedYear !== undefined ? selectedYear : now.getFullYear();
+      
+      const firstDayOfMonth = new Date(year, month, 1);
+      firstDayOfMonth.setHours(0, 0, 0, 0);
+      
+      const lastDayOfMonth = new Date(year, month + 1, 0);
+      lastDayOfMonth.setHours(23, 59, 59, 999);
+      
+      // Fetch movements for the month
+      const queryParams = new URLSearchParams({
+        businessLineId: businessLineId.toString(),
+        startDate: firstDayOfMonth.toISOString(),
+        endDate: lastDayOfMonth.toISOString()
+      });
+      
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/inventory/movements?${queryParams.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
+      }
+      
+      const monthlyMovements = await response.json() as StockMovement[];
+      
+      const wb = XLSX.utils.book_new();
+      
+      // --- INVENTORY SUMMARY WORKSHEET ---
+      const summaryData = [
+        ['MONTHLY INVENTORY REPORT', null, null, null, null],
+        [null, null, null, null, null],
+        [`Period: ${format(firstDayOfMonth, 'MMMM yyyy')}`, null, null, null, null],
+        [null, null, null, null, null],
+        ['Product', 'Opening Stock', 'Stock In', 'Stock Out', 'Closing Stock']
+      ];
+      
+      // Calculate summary for each product
+      const productSummary: Record<number, {
+        name: string;
+        openingStock: number;
+        stockIn: number;
+        stockOut: number;
+        closingStock: number;
+      }> = {};
+      
+      products.forEach(product => {
+        const productMovements = monthlyMovements.filter(m => m.ProductID === product.ProductID);
+        const stockIn = productMovements
+          .filter(m => m.Direction === 'IN')
+          .reduce((sum, m) => sum + m.Quantity, 0);
+        const stockOut = productMovements
+          .filter(m => m.Direction === 'OUT')
+          .reduce((sum, m) => sum + m.Quantity, 0);
+        
+        productSummary[product.ProductID] = {
+          name: product.Name,
+          openingStock: product.CurrentQTY + stockOut - stockIn, // Approximate
+          stockIn,
+          stockOut,
+          closingStock: product.CurrentQTY
+        };
+      });
+      
+      Object.values(productSummary).forEach(data => {
+        summaryData.push([
+          data.name,
+          data.openingStock.toString(),
+          data.stockIn.toString(),
+          data.stockOut.toString(),
+          data.closingStock.toString()
+        ]);
+      });
+      
+      const summaryWS = XLSX.utils.aoa_to_sheet(summaryData);
+      
+      setColumnWidths(summaryWS, [40, 15, 15, 15, 15]);
+      
+      const summaryMerges = [
+        ['A1', 'E1'],
+        ['A3', 'E3']
+      ];
+      
+      setMerges(summaryWS, summaryMerges);
+      
+      addBordersToWorksheet(summaryWS);
+      styleHeaderRow(summaryWS, 0);
+      styleHeaderRow(summaryWS, 4);
+      
+      XLSX.utils.book_append_sheet(wb, summaryWS, 'Summary');
+      
+      // --- MOVEMENT ANALYSIS WORKSHEET ---
+      const analysisData = [
+        ['MOVEMENT TYPE ANALYSIS', null, null, null],
+        [null, null, null, null],
+        [`Period: ${format(firstDayOfMonth, 'MMMM yyyy')}`, null, null, null],
+        [null, null, null, null],
+        ['Movement Type', 'Direction', 'Count', 'Total Quantity']
+      ];
+      
+      // Group movements by type
+      const movementTypes: Record<string, { in: number; out: number; inQty: number; outQty: number }> = {
+        'Purchase': { in: 0, out: 0, inQty: 0, outQty: 0 },
+        'Sale': { in: 0, out: 0, inQty: 0, outQty: 0 },
+        'Adjustment': { in: 0, out: 0, inQty: 0, outQty: 0 },
+        'Return': { in: 0, out: 0, inQty: 0, outQty: 0 },
+        'Transfer': { in: 0, out: 0, inQty: 0, outQty: 0 }
+      };
+      
+      monthlyMovements.forEach(movement => {
+        const type = getMovementTypeLabel(movement);
+        let category = 'Other';
+        
+        if (type.includes('Purchase')) category = 'Purchase';
+        else if (type.includes('Sale')) category = 'Sale';
+        else if (type.includes('Adjustment')) category = 'Adjustment';
+        else if (type.includes('Return')) category = 'Return';
+        else if (type.includes('Transfer')) category = 'Transfer';
+        
+        if (!movementTypes[category]) {
+          movementTypes[category] = { in: 0, out: 0, inQty: 0, outQty: 0 };
+        }
+        
+        if (movement.Direction === 'IN') {
+          movementTypes[category].in += 1;
+          movementTypes[category].inQty += movement.Quantity;
+        } else {
+          movementTypes[category].out += 1;
+          movementTypes[category].outQty += movement.Quantity;
+        }
+      });
+      
+      Object.entries(movementTypes).forEach(([type, data]) => {
+        if (data.in > 0) {
+          analysisData.push([type, 'IN', data.in.toString(), data.inQty.toString()]);
+        }
+        if (data.out > 0) {
+          analysisData.push([type, 'OUT', data.out.toString(), data.outQty.toString()]);
+        }
+      });
+      
+      const analysisWS = XLSX.utils.aoa_to_sheet(analysisData);
+      
+      setColumnWidths(analysisWS, [20, 10, 15, 20]);
+      
+      const analysisMerges = [
+        ['A1', 'D1'],
+        ['A3', 'D3']
+      ];
+      
+      setMerges(analysisWS, analysisMerges);
+      
+      addBordersToWorksheet(analysisWS);
+      styleHeaderRow(analysisWS, 0);
+      styleHeaderRow(analysisWS, 4);
+      
+      XLSX.utils.book_append_sheet(wb, analysisWS, 'Movement Analysis');
+      
+      const currentMonthStr = format(firstDayOfMonth, 'yyyy-MM');
+      XLSX.writeFile(wb, `Monthly_Inventory_Report_${currentMonthStr}.xlsx`);
+      
+      toast({
+        title: "Report Generated",
+        description: "Monthly inventory report downloaded successfully.",
+      });
+    } catch (error) {
+      console.error('Error generating monthly report:', error);
+      toast({
+        title: "Export Failed",
+        description: "Failed to generate monthly report. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadingMonthly(false);
+    }
+  };
+
+  const downloadYearlyReport = async (selectedYear?: number) => {
+    try {
+      setDownloadingYearly(true);
+      
+      const now = new Date();
+      const year = selectedYear !== undefined ? selectedYear : now.getFullYear();
+      
+      const firstDayOfYear = new Date(year, 0, 1);
+      firstDayOfYear.setHours(0, 0, 0, 0);
+      
+      const lastDayOfYear = new Date(year, 11, 31);
+      lastDayOfYear.setHours(23, 59, 59, 999);
+      
+      // Fetch movements for the year
+      const queryParams = new URLSearchParams({
+        businessLineId: businessLineId.toString(),
+        startDate: firstDayOfYear.toISOString(),
+        endDate: lastDayOfYear.toISOString()
+      });
+      
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/inventory/movements?${queryParams.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('token')}`
+          }
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`Error ${response.status}: ${response.statusText}`);
+      }
+      
+      const yearlyMovements = await response.json() as StockMovement[];
+      
+      const wb = XLSX.utils.book_new();
+      
+      // --- MONTHLY BREAKDOWN WORKSHEET ---
+      const monthlyBreakdownData = [
+        ['YEARLY INVENTORY REPORT - MONTHLY BREAKDOWN', null, null, null, null],
+        [null, null, null, null, null],
+        [`Year: ${year}`, null, null, null, null],
+        [null, null, null, null, null],
+        ['Month', 'Total Movements', 'Stock In', 'Stock Out', 'Net Change']
+      ];
+      
+      const monthNames = [
+        'January', 'February', 'March', 'April', 'May', 'June', 
+        'July', 'August', 'September', 'October', 'November', 'December'
+      ];
+      
+      let yearTotalMovements = 0;
+      let yearTotalIn = 0;
+      let yearTotalOut = 0;
+      
+      monthNames.forEach((monthName, index) => {
+        const monthMovements = yearlyMovements.filter(movement => {
+          const moveDate = new Date(movement.Date);
+          return moveDate.getMonth() === index;
+        });
+        
+        const stockIn = monthMovements
+          .filter(m => m.Direction === 'IN')
+          .reduce((sum, m) => sum + m.Quantity, 0);
+        const stockOut = monthMovements
+          .filter(m => m.Direction === 'OUT')
+          .reduce((sum, m) => sum + m.Quantity, 0);
+        const netChange = stockIn - stockOut;
+        
+        yearTotalMovements += monthMovements.length;
+        yearTotalIn += stockIn;
+        yearTotalOut += stockOut;
+        
+        monthlyBreakdownData.push([
+          monthName,
+          monthMovements.length.toString(),
+          stockIn.toString(),
+          stockOut.toString(),
+          netChange.toString()
+        ]);
+      });
+      
+      monthlyBreakdownData.push([null, null, null, null, null]);
+      monthlyBreakdownData.push([
+        'TOTAL',
+        yearTotalMovements.toString(),
+        yearTotalIn.toString(),
+        yearTotalOut.toString(),
+        (yearTotalIn - yearTotalOut).toString()
+      ]);
+      
+      const monthlyBreakdownWS = XLSX.utils.aoa_to_sheet(monthlyBreakdownData);
+      
+      setColumnWidths(monthlyBreakdownWS, [15, 15, 15, 15, 15]);
+      
+      const monthlyMerges = [
+        ['A1', 'E1'],
+        ['A3', 'E3']
+      ];
+      
+      setMerges(monthlyBreakdownWS, monthlyMerges);
+      
+      addBordersToWorksheet(monthlyBreakdownWS);
+      styleHeaderRow(monthlyBreakdownWS, 0);
+      styleHeaderRow(monthlyBreakdownWS, 4);
+      
+      XLSX.utils.book_append_sheet(wb, monthlyBreakdownWS, 'Monthly Breakdown');
+      
+      // --- TOP MOVING PRODUCTS WORKSHEET ---
+      const topProductsData = [
+        ['TOP MOVING PRODUCTS', null, null, null, null],
+        [null, null, null, null, null],
+        [`Year: ${year}`, null, null, null, null],
+        [null, null, null, null, null],
+        ['Product', 'Total Movements', 'Total In', 'Total Out', 'Turnover Rate']
+      ];
+      
+      // Calculate product movement statistics
+      const productStats: Record<number, {
+        name: string;
+        movements: number;
+        totalIn: number;
+        totalOut: number;
+        avgStock: number;
+      }> = {};
+      
+      yearlyMovements.forEach(movement => {
+        if (!productStats[movement.ProductID]) {
+          const product = products.find(p => p.ProductID === movement.ProductID);
+          productStats[movement.ProductID] = {
+            name: movement.ProductName || product?.Name || `Product ${movement.ProductID}`,
+            movements: 0,
+            totalIn: 0,
+            totalOut: 0,
+            avgStock: product?.CurrentQTY || 0
+          };
+        }
+        
+        productStats[movement.ProductID].movements += 1;
+        if (movement.Direction === 'IN') {
+          productStats[movement.ProductID].totalIn += movement.Quantity;
+        } else {
+          productStats[movement.ProductID].totalOut += movement.Quantity;
+        }
+      });
+      
+      // Sort by total movements and get top 20
+      const topProducts = Object.values(productStats)
+        .sort((a, b) => b.movements - a.movements)
+        .slice(0, 20);
+      
+      topProducts.forEach(product => {
+        const turnoverRate = product.avgStock > 0 
+          ? (product.totalOut / product.avgStock).toFixed(2)
+          : '0.00';
+        
+        topProductsData.push([
+          product.name,
+          product.movements.toString(),
+          product.totalIn.toString(),
+          product.totalOut.toString(),
+          turnoverRate
+        ]);
+      });
+      
+      const topProductsWS = XLSX.utils.aoa_to_sheet(topProductsData);
+      
+      setColumnWidths(topProductsWS, [40, 15, 15, 15, 15]);
+      
+      const topProductsMerges = [
+        ['A1', 'E1'],
+        ['A3', 'E3']
+      ];
+      
+      setMerges(topProductsWS, topProductsMerges);
+      
+      addBordersToWorksheet(topProductsWS);
+      styleHeaderRow(topProductsWS, 0);
+      styleHeaderRow(topProductsWS, 4);
+      
+      XLSX.utils.book_append_sheet(wb, topProductsWS, 'Top Products');
+      
+      // --- STOCK STATUS ANALYSIS WORKSHEET ---
+      const stockStatusData = [
+        ['STOCK STATUS ANALYSIS', null, null, null],
+        [null, null, null, null],
+        [`Year: ${year}`, null, null, null],
+        [null, null, null, null],
+        ['Metric', 'Count', 'Products', 'Percentage']
+      ];
+      
+      const outOfStock = products.filter(p => p.CurrentQTY === 0);
+      const lowStock = products.filter(p => p.CurrentQTY > 0 && p.CurrentQTY < p.MinimumQTY);
+      const adequateStock = products.filter(p => p.CurrentQTY >= p.MinimumQTY);
+      
+      const totalProducts = products.length;
+      
+      stockStatusData.push([null, null, null, null]);
+      stockStatusData.push([
+        'Out of Stock',
+        outOfStock.length.toString(),
+        outOfStock.slice(0, 5).map(p => p.Name).join(', ') + (outOfStock.length > 5 ? '...' : ''),
+        totalProducts > 0 ? ((outOfStock.length / totalProducts) * 100).toFixed(2) : '0'
+      ]);
+      stockStatusData.push([
+        'Low Stock',
+        lowStock.length.toString(),
+        lowStock.slice(0, 5).map(p => p.Name).join(', ') + (lowStock.length > 5 ? '...' : ''),
+        totalProducts > 0 ? ((lowStock.length / totalProducts) * 100).toFixed(2) : '0'
+      ]);
+      stockStatusData.push([
+        'Adequate Stock',
+        adequateStock.length.toString(),
+        adequateStock.slice(0, 5).map(p => p.Name).join(', ') + (adequateStock.length > 5 ? '...' : ''),
+        totalProducts > 0 ? ((adequateStock.length / totalProducts) * 100).toFixed(2) : '0'
+      ]);
+      
+      stockStatusData.push([null, null, null, null]);
+      stockStatusData.push(['TOTAL', totalProducts.toString(), null, '100.00']);
+      
+      const stockStatusWS = XLSX.utils.aoa_to_sheet(stockStatusData);
+      
+      setColumnWidths(stockStatusWS, [20, 10, 50, 15]);
+      
+      const stockStatusMerges = [
+        ['A1', 'D1'],
+        ['A3', 'D3']
+      ];
+      
+      setMerges(stockStatusWS, stockStatusMerges);
+      
+      addBordersToWorksheet(stockStatusWS);
+      styleHeaderRow(stockStatusWS, 0);
+      styleHeaderRow(stockStatusWS, 4);
+      styleHeaderRow(stockStatusWS, 5);
+      
+      // Format percentage column
+      for (let i = 7; i <= 9; i++) {
+        const percentRef = XLSX.utils.encode_cell({ r: i, c: 3 });
+        if (stockStatusWS[percentRef]) {
+          stockStatusWS[percentRef].z = '0.00%';
+        }
+      }
+      
+      XLSX.utils.book_append_sheet(wb, stockStatusWS, 'Stock Status');
+      
+      XLSX.writeFile(wb, `Yearly_Inventory_Report_${year}.xlsx`);
+      
+      toast({
+        title: "Report Generated",
+        description: "Yearly inventory report downloaded successfully.",
+      });
+    } catch (error) {
+      console.error('Error generating yearly report:', error);
+      toast({
+        title: "Export Failed",
+        description: "Failed to generate yearly report. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setDownloadingYearly(false);
+    }
+  };  
   
   // Updated to use the API's movementType or movementLabel directly
   const getMovementTypeLabel = (movement: StockMovement): string => {
@@ -359,12 +1023,53 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
           </div>
 
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={exportToPDF}>
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={exportCurrentInventory}
+              disabled={downloadingCurrent}
+            >
               <FileDown className="mr-2 h-4 w-4" />
-              PDF
-            </Button>                        
+              {downloadingCurrent ? 'Exporting...' : 'Export Current'}
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setMonthYearDialogOpen(true)}
+              disabled={downloadingMonthly}
+            >
+              <FileDown className="mr-2 h-4 w-4" />
+              {downloadingMonthly ? 'Downloading...' : 'Monthly Report'}
+            </Button>
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={() => setYearDialogOpen(true)}
+              disabled={downloadingYearly}
+            >
+              <FileDown className="mr-2 h-4 w-4" />
+              {downloadingYearly ? 'Downloading...' : 'Yearly Report'}
+            </Button>
           </div>
         </div>
+
+        <MonthYearDialog 
+          isOpen={monthYearDialogOpen}
+          onClose={() => setMonthYearDialogOpen(false)}
+          onConfirm={(month, year) => {
+            downloadMonthlyReport(month, year);
+            setMonthYearDialogOpen(false);
+          }}
+        />
+
+        <YearDialog 
+          isOpen={yearDialogOpen}
+          onClose={() => setYearDialogOpen(false)}
+          onConfirm={(year) => {
+            downloadYearlyReport(year);
+            setYearDialogOpen(false);
+          }}
+        />
 
         {error && (
           <Alert variant="destructive">
