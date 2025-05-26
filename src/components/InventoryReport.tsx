@@ -108,15 +108,13 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
   const [downloadingCurrent, setDownloadingCurrent] = useState(false);
 
   const handleDateSelect = (date: Date | undefined) => {
-    if (!date) return;    
-    const isToday = date.toDateString() === new Date().toDateString();
-    
+  if (!date) return;    
+  const isToday = date.toDateString() === new Date().toDateString();
+  
     if (isToday) {
       setAsOfDate(new Date());
     } else {
-      const newDate = new Date(date);
-      newDate.setHours(23, 59, 59, 999);
-      setAsOfDate(newDate);
+      setAsOfDate(new Date(date)); 
     }
     
     setDateOpen(false);
