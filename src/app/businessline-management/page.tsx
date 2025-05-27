@@ -19,6 +19,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import api from '@/lib/api/axios'
 import BusinessLineDialog from "@/components/AddBusinessLine";
+import { useAuth } from "../auth/auth-context";
 
 interface Vendor {
   VendorID: number;
@@ -40,6 +41,9 @@ export default function BusinessLineManagement() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [businessLineToDelete, setBusinessLineToDelete] = useState<number | null>(null);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
+  const { getBusinessLineID } = useAuth();
+
+  const currentUserBusinessLineId = getBusinessLineID();
 
   const fetchBusinessLines = useCallback(async () => {
     try {
@@ -76,7 +80,12 @@ export default function BusinessLineManagement() {
 
   const openDeleteDialog = (id: number) => {
     setBusinessLineToDelete(id);
-    setDeleteErrorMessage(null); // Reset error message when opening dialog
+    setDeleteErrorMessage(null);
+    
+    if (currentUserBusinessLineId && id === currentUserBusinessLineId) {
+      setDeleteErrorMessage("You cannot delete the business line you are currently logged in as.");
+    }
+    
     setIsDeleteDialogOpen(true);
   };
 
@@ -89,16 +98,20 @@ export default function BusinessLineManagement() {
   const handleDelete = async () => {
     if (!businessLineToDelete) return;
     
+    // Double-check to prevent deletion of current user's business line
+    if (currentUserBusinessLineId && businessLineToDelete === currentUserBusinessLineId) {
+      setDeleteErrorMessage("You cannot delete the business line you are currently logged in as.");
+      return;
+    }
+    
     try {
       const response = await api.delete(`/business-lines/${businessLineToDelete}`);
       
-      // Check if the response indicates dependencies
       if (response.data.hasDependencies) {
         setDeleteErrorMessage(response.data.message);
-        return; // Keep dialog open to show the error
+        return;
       }
       
-      // Only close and show success if the delete was successful
       closeDeleteDialog();
       toast({
         title: "Success",
@@ -107,7 +120,6 @@ export default function BusinessLineManagement() {
       fetchBusinessLines();
     } catch (error) {
       console.error('Error deleting business line:', error);
-      // For other types of errors
       let errorMessage = "Failed to delete business line";
       if (error && typeof error === "object" && "response" in error) {
         const err = error as { response?: { data?: { message?: string } } };
@@ -180,6 +192,8 @@ export default function BusinessLineManagement() {
                         variant="outline" 
                         size="icon"
                         onClick={() => openDeleteDialog(row.BusinessLineID)}
+                        disabled={currentUserBusinessLineId === row.BusinessLineID}
+                        className={currentUserBusinessLineId === row.BusinessLineID ? "opacity-50 cursor-not-allowed" : ""}
                       >
                         <Trash className="h-4 w-4 text-red-500" />
                       </Button>

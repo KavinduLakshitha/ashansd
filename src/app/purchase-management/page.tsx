@@ -27,8 +27,8 @@ export default function PurchaseManagementPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { getBusinessLineID } = useAuth();
   const [dateRange, setDateRange] = useState({
-    startDate: new Date("2022-02-09"),
-    endDate: new Date("2022-02-09"),
+    startDate: new Date(),
+    endDate: new Date(),
   });
   const [invoiceNumber, setInvoiceNumber] = useState("");
 
@@ -52,6 +52,11 @@ export default function PurchaseManagementPage() {
         });
         
         setVendors(filteredResponse.data);
+        
+        // Auto-select if only one vendor
+        if (filteredResponse.data.length === 1) {
+          setSelectedVendor(filteredResponse.data[0].VendorID.toString());
+        }
       } catch (error) {
         console.error('Error fetching vendors:', error);
         let errorMessage = "Failed to load vendors. Please try again.";
@@ -136,7 +141,13 @@ export default function PurchaseManagementPage() {
           />
         </div>
 
-        <div className="ml-1"><VendorProductsTable vendorId={selectedVendor} /></div>       
+        <div className="ml-1">
+          <VendorProductsTable 
+            vendorId={selectedVendor} 
+            invoiceNumber={invoiceNumber}
+            invoiceDate={dateRange.startDate}
+          />
+        </div>       
     </Card>
   );
 }

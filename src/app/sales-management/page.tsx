@@ -11,8 +11,8 @@ import SearchableSalesPersonSelect from "@/components/SearchableSalesPerson";
 
 export default function SalesManagementPage() {  
   const [dateRange, setDateRange] = useState({
-    startDate: new Date("2022-02-09"),
-    endDate: new Date("2022-02-09"),
+    startDate: new Date(),
+    endDate: new Date(),
   });
   const [selectedCustomer, setSelectedCustomer] = useState<string>("");
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | undefined>();

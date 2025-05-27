@@ -24,18 +24,20 @@ interface VendorProduct {
 
 interface VendorProductsTableProps {
   vendorId: string | null;
+  invoiceNumber?: string;
+  invoiceDate?: Date;
   onProductsSelect?: (products: VendorProduct[]) => void;
 }
 
 const VendorProductsTable: React.FC<VendorProductsTableProps> = ({ 
   vendorId,
+  invoiceNumber = '',
+  invoiceDate = new Date(),
   onProductsSelect 
 }) => {
   const [products, setProducts] = useState<VendorProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState<VendorProduct[]>([]);
-  const [invoiceNumber, setInvoiceNumber] = useState<string>('');
-  const [invoiceDate, setInvoiceDate] = useState<Date>(new Date());
 
   useEffect(() => {
     const fetchProducts = async () => {
@@ -139,9 +141,6 @@ const VendorProductsTable: React.FC<VendorProductsTableProps> = ({
         total: 0
       }))
     );
-    
-    setInvoiceNumber('');
-    setInvoiceDate(new Date());
   };
 
   if (loading) {
