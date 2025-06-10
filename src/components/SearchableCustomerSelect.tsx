@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -30,84 +30,90 @@ export default function SearchableCustomerSelect({
   const [error, setError] = useState<string | null>(null);
   
   const { getBusinessLineID } = useAuth();
-  // Store businessLineId in a ref so we don't lose it between renders
   const [businessLineId, setBusinessLineId] = useState<number | null>(null);
 
-  // First useEffect to get and set the business line ID
   useEffect(() => {
     const id = getBusinessLineID();
     console.log("Setting Business Line ID:", id);
     setBusinessLineId(id);
   }, [getBusinessLineID]);
 
-  // Second useEffect that only runs when businessLineId is available
-  useEffect(() => {
-    // Skip if businessLineId is not yet available
+  const fetchCustomers = useCallback(async () => {
     if (!businessLineId) {
       console.log("Waiting for business line ID to be available...");
       return;
     }
 
-    const fetchCustomers = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        
-        console.log("Fetching customers with Business Line ID:", businessLineId);
-        
-        const token = localStorage.getItem('token');
+    try {
+      setIsLoading(true);
+      setError(null);
+      
+      console.log("Fetching customers with Business Line ID:", businessLineId);
+      
+      const token = localStorage.getItem('token');
 
-        if (!token) {
-          throw new Error('No authentication token found');
-        }
-
-        // Now we're guaranteed to have a business line ID
-        const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/customers`, {
-          params: {
-            businessLineId: businessLineId
-          },
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-
-        // Check if response.data is an object with a data property (paginated response)
-        if (response.data && response.data.data) {
-          // Use the data array from the paginated response
-          const customersArray = response.data.data;
-          // Filter customers for current business line if needed
-          const filteredCustomers = customersArray.filter(
-            (customer: Customer) => customer.BusinessLineID === businessLineId
-          );
-          setCustomers(filteredCustomers);
-        } else if (Array.isArray(response.data)) {
-          // Handle the case where response.data is directly the array
-          const filteredCustomers = response.data.filter(
-            (customer: Customer) => customer.BusinessLineID === businessLineId
-          );
-          setCustomers(filteredCustomers);
-        } else {
-          // Neither expected format was found
-          console.error('Unexpected API response format:', response.data);
-          setError('Invalid data format received from server');
-        }
-      } catch (err: unknown) {
-        let errorMessage = 'Failed to fetch customers';
-        if (typeof err === 'object' && err !== null && 'response' in err) {
-          const response = (err as { response?: { data?: { message?: string } } }).response;
-          if (response && response.data && response.data.message) {
-            errorMessage = response.data.message;
-          }
-        }
-        setError(errorMessage);
-        console.error('Error fetching customers:', err);
-      } finally {
-        setIsLoading(false);
+      if (!token) {
+        throw new Error('No authentication token found');
       }
-    };
 
+      // Use the dedicated dropdown endpoint
+      const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/customers/dropdown`, {
+        params: {
+          businessLineId: businessLineId
+        },
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      console.log("API Response:", response.data);
+
+      if (response.data && response.data.data) {
+        // The response has a data wrapper - use it directly since backend already filters by businessLineId
+        const customersArray = response.data.data;
+        console.log("Customers from API:", customersArray);
+        setCustomers(customersArray);
+      } else if (Array.isArray(response.data)) {
+        // Direct array response - filter by businessLineId just in case
+        const filteredCustomers = response.data.filter(
+          (customer: Customer) => customer.BusinessLineID === businessLineId
+        );
+        console.log("Filtered customers:", filteredCustomers);
+        setCustomers(filteredCustomers);
+      } else {
+        console.error('Unexpected API response format:', response.data);
+        setError('Invalid data format received from server');
+      }
+    } catch (err: unknown) {
+      let errorMessage = 'Failed to fetch customers';
+      console.error('Full error object:', err);
+      
+      if (typeof err === 'object' && err !== null && 'response' in err) {
+        const response = (err as { response?: { data?: { message?: string }, status?: number } }).response;
+        if (response) {
+          console.error('Error response:', response);
+          if (response.data && response.data.message) {
+            errorMessage = response.data.message;
+          } else if (response.status === 401) {
+            errorMessage = 'Authentication failed. Please login again.';
+          } else if (response.status === 403) {
+            errorMessage = 'Access denied. Check your permissions.';
+          }
+        }
+      } else if (err instanceof Error) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
+      console.error('Error fetching customers:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [businessLineId]);
+
+  useEffect(() => {
     fetchCustomers();
-  }, [businessLineId]); // Only depends on businessLineId, not on getBusinessLineID
+  }, [fetchCustomers]);
 
   useEffect(() => {
     setSelectedValue(value);
@@ -118,6 +124,7 @@ export default function SearchableCustomerSelect({
   );
 
   const handleSelect = (customer: Customer) => {
+    console.log("Selected customer:", customer);
     onChange(customer.CusName, customer.CustomerID);
     if (onSelectCustomer) {
       onSelectCustomer(customer);
@@ -125,6 +132,16 @@ export default function SearchableCustomerSelect({
     setOpen(false);
     setSearchQuery("");
   };
+
+  // Debug logging
+  console.log("Component state:", {
+    businessLineId,
+    customersCount: customers.length,
+    filteredCount: filteredCustomers.length,
+    isLoading,
+    error,
+    searchQuery
+  });
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -160,32 +177,49 @@ export default function SearchableCustomerSelect({
           />
           <div className="flex flex-col max-h-[200px] overflow-y-auto">
             {error ? (
-              <p className="p-2 text-xs text-center text-red-500">{error}</p>
+              <div className="p-2">
+                <p className="text-xs text-center text-red-500">{error}</p>
+                <p className="text-xs text-center text-gray-400 mt-1">
+                  Total customers loaded: {customers.length}
+                </p>
+              </div>
             ) : isLoading ? (
               <p className="p-2 text-xs text-center text-muted-foreground">Loading customers...</p>
+            ) : customers.length === 0 ? (
+              <p className="p-2 text-xs text-center text-muted-foreground">No customers found for this business line.</p>
             ) : filteredCustomers.length === 0 ? (
-              <p className="p-2 text-xs text-center text-muted-foreground">No customer found.</p>
+              <div className="p-2">
+                <p className="text-xs text-center text-muted-foreground">No customer found matching &quot;{searchQuery}&quot;.</p>
+                <p className="text-xs text-center text-gray-400 mt-1">
+                  Total customers: {customers.length}
+                </p>
+              </div>
             ) : (
-              filteredCustomers.map((customer) => (
-                <button
-                  key={customer.CustomerID}
-                  onClick={() => handleSelect(customer)}
-                  className={cn(
-                    "relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground",
-                    selectedValue === customer.CusName && "bg-accent text-accent-foreground"
-                  )}
-                >
-                  <Check
+              <>
+                <div className="px-2 py-1 text-xs text-gray-400 border-b">
+                  {filteredCustomers.length} of {customers.length} customers
+                </div>
+                {filteredCustomers.map((customer) => (
+                  <button
+                    key={customer.CustomerID}
+                    onClick={() => handleSelect(customer)}
                     className={cn(
-                      "mr-2 h-4 w-4",
-                      selectedValue === customer.CusName ? "opacity-100" : "opacity-0"
+                      "relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground",
+                      selectedValue === customer.CusName && "bg-accent text-accent-foreground"
                     )}
-                  />
-                  <div className="flex flex-col">
-                    <span>{customer.CusName}</span>                    
-                  </div>
-                </button>
-              ))
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        selectedValue === customer.CusName ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    <div className="flex flex-col">
+                      <span>{customer.CusName}</span>                    
+                    </div>
+                  </button>
+                ))}
+              </>
             )}
           </div>
         </div>
