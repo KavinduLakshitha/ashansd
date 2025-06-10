@@ -77,6 +77,22 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
     return cheques.reduce((sum, cheque) => sum + (cheque.amount || 0), 0);
   }, [cheques]);
 
+  // Calculate remaining amounts for suggestions
+  const paymentSuggestions = useMemo(() => {
+    const cashTotal = Number(cashAmount) || 0;
+    const chequeTotal = getTotalChequeAmount();
+    const creditTotal = Number(creditAmount) || 0;
+    
+    const afterCash = Math.max(0, totalPayableAmount - cashTotal);
+    const afterCashAndCredit = Math.max(0, totalPayableAmount - cashTotal - creditTotal);
+    
+    return {
+      suggestedCredit: afterCash,
+      suggestedCheque: afterCashAndCredit,
+      remainingAfterAll: totalPayableAmount - cashTotal - chequeTotal - creditTotal
+    };
+  }, [cashAmount, creditAmount, getTotalChequeAmount, totalPayableAmount]);
+
   const isPaymentValid = useMemo(() => {
     const cashTotal = Number(cashAmount) || 0;
     const chequeTotal = getTotalChequeAmount();
@@ -100,20 +116,67 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
     setter: React.Dispatch<React.SetStateAction<number | ''>>
   ) => {
     const parsedValue = parseFloat(value);
-    setter(!isNaN(parsedValue) ? parsedValue : '');
+    const newValue = !isNaN(parsedValue) ? parsedValue : '';
+    setter(newValue);
+    
+    // If this is discount change, auto-update payment methods
+    if (setter === setDiscount) {
+      const newPayableAmount = total - (parsedValue || 0);
+      const cashTotal = Number(cashAmount) || 0;
+      const creditTotal = Number(creditAmount) || 0;
+      const chequeTotal = getTotalChequeAmount();
+      const currentTotalPayment = cashTotal + creditTotal + chequeTotal;
+      
+      // Check if payment was previously balanced
+      const wasBalanced = Math.abs(currentTotalPayment - totalPayableAmount) < 0.01;
+      
+      if (wasBalanced) {
+        // Maintain the same payment distribution but adjust to new payable amount
+        const paymentRatio = currentTotalPayment > 0 ? newPayableAmount / currentTotalPayment : 1;
+        
+        if (creditTotal > 0) {
+          setCreditAmount(Math.max(0, creditTotal * paymentRatio));
+        }
+        if (chequeTotal > 0 && cheques.length > 0) {
+          // Update the first cheque proportionally
+          const newFirstChequeAmount = Math.max(0, (cheques[0].amount || 0) * paymentRatio);
+          updateChequeAmount(0, newFirstChequeAmount);
+        }
+      }
+    }
+  };
+
+  const handleCashAmountChange = (value: string) => {
+    const parsedValue = parseFloat(value);
+    setCashAmount(!isNaN(parsedValue) ? parsedValue : '');
+  };
+
+  const handleCreditAmountChange = (value: string) => {
+    const parsedValue = parseFloat(value);
+    setCreditAmount(!isNaN(parsedValue) ? parsedValue : '');
   };
 
   const addCheque = () => {
-    setCheques([...cheques, {
+    const newCheque: ChequeDetails = {
       amount: '',
       chequeNumber: '',
       realizeDate: null,
       bank: ''
-    }]);
+    };
+    
+    setCheques([...cheques, newCheque]);
   };
 
   const removeCheque = (index: number) => {
     setCheques(cheques.filter((_, i) => i !== index));
+  };
+
+  // Simple function to update cheque amount
+  const updateChequeAmount = (index: number, amount: number | string) => {
+    const updatedCheques = [...cheques];
+    const parsedValue = parseFloat(amount as string);
+    updatedCheques[index].amount = !isNaN(parsedValue) ? parsedValue : '';
+    setCheques(updatedCheques);
   };
 
   const updateCheque = (
@@ -122,9 +185,11 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
     value: ChequeDetails[keyof ChequeDetails]
   ) => {
     const updatedCheques = [...cheques];
+    
     if (field === 'amount') {
-      const parsedValue = parseFloat(value as string);
-      updatedCheques[index][field] = !isNaN(parsedValue) ? parsedValue : '' as ChequeDetails['amount'];
+      // Use the separate function for amount updates
+      updateChequeAmount(index, value as string);
+      return;
     } else if (field === 'realizeDate') {
       updatedCheques[index][field] = value as Date | null;
     } else {
@@ -218,7 +283,6 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
           <p className='text-xs'>{total.toFixed(2)}</p>
           <div></div>
 
-
           {!isStockIn && (
             <>
               <Label className='text-xs'>Discount</Label>
@@ -237,27 +301,40 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
             </>
           )}
           <div className="col-span-3 border-t mt-0 pt-2 font-bold">Payment Methods</div>
+          
           <Label className='text-xs'>Cash Amount</Label>
           <Input
             type="number"
             min="0"
-            placeholder="Cash Amount"
             value={cashAmount}
             className="w-[240px]"
-            onChange={(e) => handleInputChange(e.target.value, setCashAmount)}
+            onChange={(e) => handleCashAmountChange(e.target.value)}
           />
           <div></div>
 
           <Label className='text-xs'>Credit Amount</Label>
-          <Input
-            type="number"
-            min="0"
-            placeholder="Credit Amount"
-            value={creditAmount}
-            className="w-[240px]"
-            onChange={(e) => handleInputChange(e.target.value, setCreditAmount)}
-          />
+          <div className="relative">
+            <Input
+              type="number"
+              min="0"
+              value={creditAmount}
+              className="w-[240px]"
+              onChange={(e) => handleCreditAmountChange(e.target.value)}
+            />
+            {paymentSuggestions.suggestedCredit > 0 && (creditAmount === 0 || creditAmount === '') && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-1 top-1 h-6 px-2 text-xs text-gray-500 hover:text-gray-700"
+                onClick={() => setCreditAmount(paymentSuggestions.suggestedCredit)}
+              >
+                Use {paymentSuggestions.suggestedCredit.toFixed(2)}
+              </Button>
+            )}
+          </div>
           <div></div>
+          
           <Label className='text-xs'>Due Date</Label>
           <div className='w-96'>
             <DatePicker
@@ -281,19 +358,30 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
                 </Button>
               </div>
               <Label className='text-xs'>Amount</Label>
-              <Input
-                type="number"
-                min="0"
-                placeholder="Cheque Amount"
-                value={cheque.amount}
-                className="w-[240px]"
-                onChange={(e) => updateCheque(index, 'amount', e.target.value)}
-              />
+              <div className="relative">
+                <Input
+                  type="number"
+                  min="0"
+                  value={cheque.amount}
+                  className="w-[240px]"
+                  onChange={(e) => updateCheque(index, 'amount', e.target.value)}
+                />
+                {index === 0 && paymentSuggestions.suggestedCheque > 0 && (cheque.amount === '' || cheque.amount === 0) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="absolute right-1 top-1 h-6 px-2 text-xs text-gray-500 hover:text-gray-700"
+                    onClick={() => updateChequeAmount(0, paymentSuggestions.suggestedCheque)}
+                  >
+                    Use {paymentSuggestions.suggestedCheque.toFixed(2)}
+                  </Button>
+                )}
+              </div>
               <div></div>
               <Label className='text-xs'>Cheque Number</Label>
               <Input
                 type="text"
-                placeholder="Cheque Number"
                 value={cheque.chequeNumber}
                 className="w-[240px]"
                 onChange={(e) => updateCheque(index, 'chequeNumber', e.target.value)}
@@ -310,7 +398,6 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
               <Label className='text-xs'>Bank</Label>
               <Input
                 type="text"
-                placeholder="Bank"
                 value={cheque.bank}
                 className="w-[240px]"
                 onChange={(e) => updateCheque(index, 'bank', e.target.value)}
@@ -343,6 +430,16 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
               <span>Rs. {(Number(creditAmount) || 0).toFixed(2)}</span>
               <span className="font-medium">Total Entered:</span>
               <span className="font-medium">Rs. {((Number(cashAmount) || 0) + getTotalChequeAmount() + (Number(creditAmount) || 0)).toFixed(2)}</span>
+              {Math.abs(paymentSuggestions.remainingAfterAll) > 0.01 && (
+                <>
+                  <span className={paymentSuggestions.remainingAfterAll > 0 ? "text-red-600" : "text-green-600"}>
+                    {paymentSuggestions.remainingAfterAll > 0 ? "Remaining:" : "Excess:"}
+                  </span>
+                  <span className={paymentSuggestions.remainingAfterAll > 0 ? "text-red-600" : "text-green-600"}>
+                    Rs. {Math.abs(paymentSuggestions.remainingAfterAll).toFixed(2)}
+                  </span>
+                </>
+              )}
             </div>
           </div>
           
