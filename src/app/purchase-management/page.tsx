@@ -25,11 +25,8 @@ export default function PurchaseManagementPage() {
   const [selectedVendor, setSelectedVendor] = useState<string>("");
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const { getBusinessLineID } = useAuth();
-  const [dateRange, setDateRange] = useState({
-    startDate: new Date(),
-    endDate: new Date(),
-  });
+  const { getBusinessLineID } = useAuth();  
+  const [invoiceDate, setInvoiceDate] = useState<Date>(new Date());
   const [invoiceNumber, setInvoiceNumber] = useState("");
 
   useEffect(() => {
@@ -78,8 +75,9 @@ export default function PurchaseManagementPage() {
     fetchVendors();
   }, [getBusinessLineID]);
 
-  const handleDateChange = (field: "startDate" | "endDate", date: Date) => {
-    setDateRange((prev) => ({ ...prev, [field]: date }));
+  const handleDateChange = (date: Date) => {
+    console.log('Date selected:', date);
+    setInvoiceDate(date);
   };
 
   const handleVendorChange = async (vendorId: string) => {
@@ -129,8 +127,8 @@ export default function PurchaseManagementPage() {
           </Select>
 
           <DatePicker
-            selectedDate={dateRange.startDate}
-            onDateChange={(date) => handleDateChange("startDate", date)}
+            selectedDate={invoiceDate}
+            onDateChange={handleDateChange}
           />
 
           <Input 
@@ -145,7 +143,7 @@ export default function PurchaseManagementPage() {
           <VendorProductsTable 
             vendorId={selectedVendor} 
             invoiceNumber={invoiceNumber}
-            invoiceDate={dateRange.startDate}
+            invoiceDate={invoiceDate}
           />
         </div>       
     </Card>

@@ -97,7 +97,6 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
 
       const formattedInvoiceDate = formatDateForSQL(invoiceDate);
       const formattedDueDate = formatDateForSQL(dueDate);
-      const formattedCurrentDate = formatDateForSQL(new Date());
 
       // Prepare the purchase data
       const purchaseData = {
@@ -110,7 +109,6 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
         })),
         invoiceNumber,
         invoiceDate: formattedInvoiceDate,
-        date: formattedCurrentDate,
         cashAmount: Number(cashAmount) || 0,
         creditPayment: {
           amount: Number(creditAmount) || 0,
