@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, ChevronRight, Filter, FileDown } from "lucide-react";
+import { ChevronDown, ChevronRight, Filter, FileDown, Trash2, AlertTriangle } from "lucide-react";
 import { DateRange } from "react-day-picker";
 import { addDays, format } from "date-fns";
 import { parseISO } from "date-fns";
@@ -16,6 +16,17 @@ import SearchableCustomerSelect from './SearchableCustomerSelect';
 import _ from 'lodash';
 import * as XLSX from 'xlsx';
 import { MonthYearDialog, YearDialog } from './MonthYearSelectors';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from '@/hooks/use-toast';
 
 interface PaymentDetails {
   chequeNumber?: string;
@@ -73,6 +84,9 @@ const SalesTable = () => {
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
   const [monthYearDialogOpen, setMonthYearDialogOpen] = useState(false);
   const [yearDialogOpen, setYearDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [saleToDelete, setSaleToDelete] = useState<{saleId: string, invoiceId: string, customerName: string} | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [filters, setFilters] = useState<FilterState>({
     businessLine: '',
     salesPerson: '',
@@ -111,6 +125,61 @@ const SalesTable = () => {
       startDate: startDate.toISOString(),
       endDate: endDate.toISOString()
     };
+  };
+
+  // Delete sale function
+  const deleteSale = async (saleId: string) => {
+    try {
+      setDeletingId(saleId);
+      
+      const response = await axios.delete(
+        `${process.env.NEXT_PUBLIC_API_URL}/sales/${saleId}`
+      );
+      
+      if (response.status === 200) {
+        // Remove the deleted sale from state
+        setSales(prevSales => 
+          prevSales.filter(sale => sale.SaleID !== saleId)
+        );
+        
+        // Remove sale items from state
+        setSaleItems(prevItems => {
+          const newItems = { ...prevItems };
+          delete newItems[saleId];
+          return newItems;
+        });
+        
+        // Remove from expanded invoices if it was expanded
+        setExpandedInvoices(prev => {
+          const newExpanded = new Set(prev);
+          // Find the invoice ID for this sale and remove it
+          const saleToRemove = sales.find(sale => sale.SaleID === saleId);
+          if (saleToRemove) {
+            newExpanded.delete(saleToRemove.InvoiceID);
+          }
+          return newExpanded;
+        });
+        
+        toast({ description: 'Sale deleted successfully' });
+      }
+    } catch (error: unknown) {
+      console.error('Error deleting sale:', error);
+      let errorMessage = 'Error deleting sale';
+      if (typeof error === 'object' && error !== null && 'response' in error) {
+        const err = error as { response?: { data?: { message?: string } } };
+        errorMessage = err.response?.data?.message || errorMessage;
+      }
+      toast({ description: `Failed to delete sale: ${errorMessage}` });
+    } finally {
+      setDeletingId(null);
+      setDeleteDialogOpen(false);
+      setSaleToDelete(null);
+    }
+  };
+
+  const handleDeleteClick = (saleId: string, invoiceId: string, customerName: string) => {
+    setSaleToDelete({ saleId, invoiceId, customerName });
+    setDeleteDialogOpen(true);
   };
 
   useEffect(() => {
@@ -286,7 +355,21 @@ const SalesTable = () => {
     setExpandedInvoices(newExpanded);
   };
 
-  // Helper functions for Excel generation
+  // Check if a sale can be deleted (no processed payments)
+  const canDeleteSale = (invoiceSales: Sale[]): boolean => {
+    return !invoiceSales.some(sale => {
+      if (sale.PaymentMethod === 'CASH') return false; // Cash payments can always be deleted
+      if (sale.PaymentMethod === 'CHEQUE') {
+        return sale.paymentDetails?.status === 'REALIZED';
+      }
+      if (sale.PaymentMethod === 'CREDIT') {
+        return sale.paymentDetails?.status === 'SETTLED';
+      }
+      return false;
+    });
+  };
+
+  // Helper functions for Excel generation (keeping the same as before)
   const setColumnWidths = (worksheet: XLSX.WorkSheet, widths: number[]) => {
     worksheet['!cols'] = widths.map((width) => ({ wch: width }));
   };
@@ -363,7 +446,6 @@ const SalesTable = () => {
     }
   };
 
-  // Function to download a single invoice as Excel
   const downloadInvoiceAsExcel = async (invoiceId: string, saleId: string) => {
     try {
       setDownloadingExcel(true);
@@ -1349,6 +1431,48 @@ const SalesTable = () => {
           }}
         />
 
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+                Confirm Sale Deletion
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div>
+                  <p>Are you sure you want to delete this sale?</p>
+                  <div className="mt-2 p-3 bg-gray-50 rounded">
+                    <p><strong>Invoice ID:</strong> {saleToDelete?.invoiceId}</p>
+                    <p><strong>Customer:</strong> {saleToDelete?.customerName}</p>
+                  </div>
+                  <p className="mt-2 text-sm text-orange-600">
+                    <strong>Warning:</strong> This action will:
+                  </p>
+                  <ul className="mt-1 text-sm text-orange-600 list-disc list-inside">
+                    <li>Permanently delete the sale and all associated data</li>
+                    <li>Restore product quantities to inventory</li>
+                    <li>Remove all payment records for this sale</li>
+                  </ul>
+                  <p className="mt-2 text-sm font-medium text-red-600">
+                    This action cannot be undone.
+                  </p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => saleToDelete && deleteSale(saleToDelete.saleId)}
+                className="bg-red-600 hover:bg-red-700"
+                disabled={deletingId !== null}
+              >
+                {deletingId === saleToDelete?.saleId ? 'Deleting...' : 'Delete Sale'}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         <div className="rounded-md border">
           <Table>
             <TableHeader>
@@ -1384,6 +1508,7 @@ const SalesTable = () => {
                     const totalAmount = invoiceSales.reduce((sum, sale) => sum + Number(sale.Amount), 0);
                     const isExpanded = expandedInvoices.has(invoiceId);
                     const saleId = firstSale.SaleID;
+                    const canDelete = canDeleteSale(invoiceSales);
 
                     return (
                       <React.Fragment key={invoiceId}>
@@ -1414,18 +1539,46 @@ const SalesTable = () => {
                             ))}
                           </TableCell>
                           <TableCell>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                downloadInvoiceAsExcel(invoiceId, saleId);
-                              }}
-                              disabled={downloadingExcel}
-                              title="Download Invoice"
-                            >
-                              <FileDown className="h-4 w-4" />
-                            </Button>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  downloadInvoiceAsExcel(invoiceId, saleId);
+                                }}
+                                disabled={downloadingExcel}
+                                title="Download Invoice"
+                              >
+                                <FileDown className="h-4 w-4" />
+                              </Button>
+                              
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteClick(saleId, invoiceId, firstSale.CustomerName);
+                                }}
+                                disabled={!canDelete || deletingId === saleId}
+                                title={
+                                  canDelete 
+                                    ? "Delete Sale" 
+                                    : "Cannot delete sale with processed payments"
+                                }
+                                className={
+                                  canDelete 
+                                    ? "hover:bg-red-50 hover:text-red-600" 
+                                    : "opacity-50 cursor-not-allowed"
+                                }
+                              >
+                                {deletingId === saleId ? (
+                                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                         

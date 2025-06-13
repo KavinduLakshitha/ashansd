@@ -15,6 +15,10 @@ import { addDays, format } from "date-fns";
 import { parseISO } from "date-fns";
 import * as XLSX from 'xlsx';
 import { MonthYearDialog, YearDialog } from './MonthYearSelectors';
+import { Trash2, AlertTriangle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import _ from 'lodash';
 
 interface Vendor {
   VendorName: string;
@@ -81,6 +85,13 @@ const PurchaseReportsTable = () => {
   });
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("ALL");
 
+  const [deleteDialog, setDeleteDialog] = useState({
+    open: false,
+    purchaseId: '',
+    invoiceNumber: '',
+    loading: false
+  });
+
   const adjustDateRange = (dateRange: DateRange | undefined): { 
     startDate: string | undefined, 
     endDate: string | undefined 
@@ -139,6 +150,65 @@ const PurchaseReportsTable = () => {
 
     fetchInitialData();
   }, [getBusinessLineID, filters.dateRange]);
+
+  const handleDeletePurchase = async (purchaseId: string, invoiceNumber: string) => {
+    setDeleteDialog({
+      open: true,
+      purchaseId,
+      invoiceNumber,
+      loading: false
+    });
+  };
+
+  const confirmDeletePurchase = async () => {
+    try {
+      setDeleteDialog(prev => ({ ...prev, loading: true }));
+      setError(null);
+
+      const response = await axios.delete(
+        `${process.env.NEXT_PUBLIC_API_URL}/purchases/${deleteDialog.purchaseId}`
+      );
+
+      // Remove the deleted purchase from the state
+      setPurchases(prev => prev.filter(p => p.PurchaseID !== deleteDialog.purchaseId));
+      
+      // Close any expanded items for this purchase
+      setExpandedInvoices(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(deleteDialog.purchaseId);
+        return newSet;
+      });
+
+      // Show success message (you can customize this)
+      console.log('Purchase deleted successfully:', response.data);
+      
+      // Close dialog
+      setDeleteDialog({
+        open: false,
+        purchaseId: '',
+        invoiceNumber: '',
+        loading: false
+      });
+
+    } catch (error) {
+      console.error('Error deleting purchase:', error);
+      setDeleteDialog(prev => ({ ...prev, loading: false }));
+      
+      if (isAxiosError(error)) {
+        if (error.response?.status === 404) {
+          setError('Purchase not found.');
+        } else if (error.response?.status === 400) {
+          setError(error.response.data.message || 'Cannot delete purchase due to insufficient stock.');
+        } else if (error.response?.status === 403) {
+          setError('You do not have permission to delete this purchase.');
+        } else {
+          setError('Failed to delete purchase. Please try again.');
+        }
+      } else {
+        setError('Failed to delete purchase. Please try again.');
+      }
+    }
+  };
 
   // Helper functions for Excel generation
   const setColumnWidths = (worksheet: XLSX.WorkSheet, widths: number[]) => {
@@ -958,19 +1028,22 @@ const PurchaseReportsTable = () => {
     setFilters(prev => ({ ...prev, invoiceNumber: e.target.value }));
   };
 
-  const toggleInvoiceExpand = async (purchaseId: string) => {
+  const toggleInvoiceExpand = async (invoiceNumber: string) => {
     const newExpanded = new Set(expandedInvoices);
     
-    if (newExpanded.has(purchaseId)) {
-      newExpanded.delete(purchaseId);
+    if (newExpanded.has(invoiceNumber)) {
+      newExpanded.delete(invoiceNumber);
     } else {
-      if (!purchases.find(p => p.PurchaseID === purchaseId)?.items) {
+      const invoicePurchases = purchases.filter(p => p.InvoiceNumber === invoiceNumber);
+      const firstPurchase = invoicePurchases[0];
+      
+      if (firstPurchase && !firstPurchase.items) {
         try {
           const response = await axios.get(
-            `${process.env.NEXT_PUBLIC_API_URL}/purchases/${purchaseId}/items`
+            `${process.env.NEXT_PUBLIC_API_URL}/purchases/${firstPurchase.PurchaseID}/items`
           );
           setPurchases(prev => prev.map(purchase => 
-            purchase.PurchaseID === purchaseId 
+            purchase.InvoiceNumber === invoiceNumber
               ? { ...purchase, items: response.data }
               : purchase
           ));
@@ -979,14 +1052,31 @@ const PurchaseReportsTable = () => {
           setError('Failed to fetch purchase items. Please try again.');
         }
       }
-      newExpanded.add(purchaseId);
+      newExpanded.add(invoiceNumber);
     }
     setExpandedInvoices(newExpanded);
+  };
+
+  const canDeletePurchase = (invoicePurchases: Purchase[]): boolean => {
+    return !invoicePurchases.some(purchase => {
+      if (purchase.PaymentMethod === 'CASH') return false;
+      if (purchase.PaymentMethod === 'CREDIT') {
+        return purchase.paymentDetails?.status === 'SETTLED';
+      }
+      return false;
+    });
   };
 
   const filteredPurchases = selectedPaymentMethod === 'ALL' || !selectedPaymentMethod
     ? purchases
     : purchases.filter(purchase => purchase.PaymentMethod === selectedPaymentMethod);
+
+  const groupedPurchases = _.groupBy(
+    filteredPurchases.filter(purchase => 
+      purchase.InvoiceNumber.toLowerCase().includes(filters.invoiceNumber.toLowerCase())
+    ), 
+    'InvoiceNumber'
+  );
 
   return (
     <Card className="w-full shadow-none rounded-tl-none rounded-tr-none border-0">
@@ -1121,7 +1211,7 @@ const PurchaseReportsTable = () => {
                     </div>
                   </TableCell>
                 </TableRow>
-              ) : filteredPurchases.length === 0 ? (
+              ) : Object.entries(groupedPurchases).length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="h-32 text-center">
                     <div className="flex flex-col items-center justify-center gap-2">
@@ -1131,58 +1221,129 @@ const PurchaseReportsTable = () => {
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredPurchases
-                  .filter(purchase => 
-                    purchase.InvoiceNumber.toLowerCase().includes(filters.invoiceNumber.toLowerCase())
-                  )
-                  .map((purchase, index) => {
-                    const isExpanded = expandedInvoices.has(purchase.PurchaseID);
-                    const rowKey = `purchase-${purchase.PurchaseID}-${index}`;
-                    const status = getPaymentStatus(purchase);
+                Object.entries(groupedPurchases).map(([invoiceNumber, invoicePurchases]) => {
+                  const firstPurchase = invoicePurchases[0];
+                  const totalAmount = invoicePurchases.reduce((sum, purchase) => sum + Number(purchase.Amount), 0);
+                  const isExpanded = expandedInvoices.has(invoiceNumber);
+                  const purchaseId = firstPurchase.PurchaseID;
+                  const canDelete = canDeletePurchase(invoicePurchases);
 
-                    return (
-                      <React.Fragment key={rowKey}>
-                        <TableRow 
-                          className="cursor-pointer hover:bg-gray-50 transition-colors"
-                          onClick={() => toggleInvoiceExpand(purchase.PurchaseID)}
-                        >
-                          <TableCell className="flex items-center gap-2">
-                            {isExpanded ? 
-                              <ChevronDown className="h-4 w-4 text-gray-500" /> : 
-                              <ChevronRight className="h-4 w-4 text-gray-500" />
-                            }
-                            <span className="font-medium">{purchase.InvoiceNumber}</span>
-                          </TableCell>
-                          <TableCell className="text-gray-600">
-                            {new Date(purchase.PurchaseDate).toLocaleDateString()}
-                          </TableCell>
-                          <TableCell className="text-gray-600">{purchase.VendorName}</TableCell>
-                          <TableCell className="font-medium">
-                            {formatCurrency(purchase.Amount)}
-                          </TableCell>
-                          <TableCell>
-                            <Badge className={`${status.className} px-2 py-1`}>
-                              {`${purchase.PaymentMethod} - ${status.text}`}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="text-right">
+                  return (
+                    <React.Fragment key={invoiceNumber}>
+                      <TableRow 
+                        className="cursor-pointer hover:bg-gray-50 transition-colors"
+                        onClick={() => toggleInvoiceExpand(invoiceNumber)}
+                      >
+                        <TableCell className="flex items-center gap-2">
+                          {isExpanded ? 
+                            <ChevronDown className="h-4 w-4 text-gray-500" /> : 
+                            <ChevronRight className="h-4 w-4 text-gray-500" />
+                          }
+                          <span className="font-medium">{invoiceNumber}</span>
+                        </TableCell>
+                        <TableCell className="text-gray-600">
+                          {new Date(firstPurchase.PurchaseDate).toLocaleDateString()}
+                        </TableCell>
+                        <TableCell className="text-gray-600">{firstPurchase.VendorName}</TableCell>
+                        <TableCell className="font-medium">
+                          {formatCurrency(totalAmount)}
+                        </TableCell>
+                        <TableCell>
+                          {invoicePurchases.map(purchase => {
+                            const status = getPaymentStatus(purchase);
+                            return (
+                              <Badge 
+                                key={purchase.PaymentID}
+                                className={`${status.className} px-2 py-1 mr-2 mb-1`}
+                              >
+                                {`${purchase.PaymentMethod} - ${status.text}`}
+                              </Badge>
+                            );
+                          })}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1">
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDownloadExcel(purchase.PurchaseID);
+                                handleDownloadExcel(purchaseId);
                               }}
                               className="hover:bg-gray-100"
+                              title="Download Excel Report"
                             >
                               <FileDown className="h-4 w-4" />
                             </Button>
-                          </TableCell>
-                        </TableRow>
-                        {isExpanded && (
-                          <TableRow className="bg-gray-50">
-                            <TableCell colSpan={6} className="p-0">
-                              <div className="p-6">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeletePurchase(purchaseId, invoiceNumber);
+                              }}
+                              disabled={!canDelete}
+                              className={
+                                canDelete 
+                                  ? "hover:bg-red-100 text-red-600 hover:text-red-700" 
+                                  : "opacity-50 cursor-not-allowed"
+                              }
+                              title={
+                                canDelete 
+                                  ? "Delete Purchase" 
+                                  : "Cannot delete purchase with settled payments"
+                              }
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                      {isExpanded && (
+                        <TableRow className="bg-gray-50">
+                          <TableCell colSpan={6} className="p-0">
+                            <div className="p-6">
+                              {/* Payment Details Section */}
+                              <div className="mb-4">
+                                <h4 className="text-sm font-semibold text-gray-900 mb-2">Payment Details</h4>
+                                <div className="bg-white rounded-lg border">
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow className="bg-gray-50">
+                                        <TableCell className="font-medium">Payment Method</TableCell>
+                                        <TableCell className="font-medium">Amount</TableCell>
+                                        <TableCell className="font-medium">Status</TableCell>
+                                        <TableCell className="font-medium">Details</TableCell>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {invoicePurchases.map(purchase => {
+                                        const status = getPaymentStatus(purchase);
+                                        return (
+                                          <TableRow key={purchase.PaymentID}>
+                                            <TableCell>{purchase.PaymentMethod}</TableCell>
+                                            <TableCell>{formatCurrency(purchase.Amount)}</TableCell>
+                                            <TableCell>
+                                              <Badge className={status.className}>
+                                                {status.text}
+                                              </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                              {purchase.PaymentMethod === 'CREDIT' && purchase.paymentDetails && purchase.paymentDetails.dueDate && (
+                                                <>Due: {new Date(purchase.paymentDetails.dueDate).toLocaleDateString()}</>
+                                              )}
+                                              {purchase.PaymentMethod === 'CASH' && 'Paid in Cash'}
+                                            </TableCell>
+                                          </TableRow>
+                                        );
+                                      })}
+                                    </TableBody>
+                                  </Table>
+                                </div>
+                              </div>
+
+                              {/* Purchase Items Section */}
+                              <div>
                                 <h4 className="text-sm font-semibold text-gray-900 mb-4">Purchase Items</h4>
                                 <div className="bg-white rounded-lg border">
                                   <Table>
@@ -1195,8 +1356,8 @@ const PurchaseReportsTable = () => {
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
-                                      {purchase.items?.map((item, itemIndex) => (
-                                        <TableRow key={`${rowKey}-item-${item.ProductID}-${itemIndex}`}>
+                                      {firstPurchase.items?.map((item, itemIndex) => (
+                                        <TableRow key={`${invoiceNumber}-item-${item.ProductID}-${itemIndex}`}>
                                           <TableCell>{item.Name}</TableCell>
                                           <TableCell>{item.Quantity}</TableCell>
                                           <TableCell>{formatCurrency(item.UnitPrice)}</TableCell>
@@ -1205,33 +1366,96 @@ const PurchaseReportsTable = () => {
                                           </TableCell>
                                         </TableRow>
                                       ))}
+                                      {firstPurchase.items && (
+                                        <TableRow>
+                                          <TableCell colSpan={3} className="text-right font-semibold">
+                                            Subtotal:
+                                          </TableCell>
+                                          <TableCell className="font-semibold">
+                                            {formatCurrency(
+                                              firstPurchase.items.reduce((sum, item) => sum + Number(item.TotalPrice), 0)
+                                            )}
+                                          </TableCell>
+                                        </TableRow>
+                                      )}
                                     </TableBody>
                                   </Table>
                                 </div>
-
-                                {purchase.PaymentMethod === 'CREDIT' && purchase.paymentDetails && (
-                                  <div className="mt-6">
-                                    <h4 className="text-sm font-semibold text-gray-900 mb-2">
-                                      Payment Details
-                                    </h4>
-                                    <div className="bg-white rounded-lg border p-4">
-                                      <p className="text-sm text-gray-600">
-                                        Due Date: {new Date(purchase.paymentDetails.dueDate || '').toLocaleDateString()}
-                                      </p>
-                                    </div>
-                                  </div>
-                                )}
                               </div>
-                            </TableCell>
-                          </TableRow>
-                        )}
-                      </React.Fragment>
-                    );
-                  })
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </React.Fragment>
+                  );
+                })
               )}
             </TableBody>
           </Table>
         </div>
+
+        <Dialog open={deleteDialog.open} onOpenChange={(open) => !deleteDialog.loading && setDeleteDialog(prev => ({ ...prev, open }))}>
+          <DialogContent className="sm:max-w-[425px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-500" />
+                Delete Purchase
+              </DialogTitle>
+            </DialogHeader>
+            
+            <div className="space-y-4">
+              <Alert>
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription>
+                  This action cannot be undone. This will permanently delete the purchase record and reverse all associated stock movements.
+                </AlertDescription>
+              </Alert>
+              
+              <div className="space-y-2">
+                <p className="text-sm text-gray-600">
+                  Are you sure you want to delete this purchase?
+                </p>
+                <div className="bg-gray-50 p-3 rounded-lg">
+                  <p className="text-sm">
+                    <span className="font-medium">Invoice Number:</span> {deleteDialog.invoiceNumber}
+                  </p>
+                  <p className="text-sm">
+                    <span className="font-medium">Purchase ID:</span> {deleteDialog.purchaseId}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeleteDialog(prev => ({ ...prev, open: false }))}
+                disabled={deleteDialog.loading}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={confirmDeletePurchase}
+                disabled={deleteDialog.loading}
+              >
+                {deleteDialog.loading ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Purchase
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </CardContent>
     </Card>
   );

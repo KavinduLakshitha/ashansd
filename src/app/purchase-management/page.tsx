@@ -76,7 +76,6 @@ export default function PurchaseManagementPage() {
   }, [getBusinessLineID]);
 
   const handleDateChange = (date: Date) => {
-    console.log('Date selected:', date);
     setInvoiceDate(date);
   };
 
