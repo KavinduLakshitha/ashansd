@@ -52,6 +52,19 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
 
+  // Calculate payment suggestions
+  const paymentSuggestions = useMemo(() => {
+    const cashTotal = Number(cashAmount) || 0;
+    const creditTotal = Number(creditAmount) || 0;
+    
+    const afterCash = Math.max(0, total - cashTotal);
+    
+    return {
+      suggestedCredit: afterCash,
+      remainingAfterAll: total - cashTotal - creditTotal
+    };
+  }, [cashAmount, creditAmount, total]);
+
   const isPaymentValid = useMemo(() => {
     const cashTotal = Number(cashAmount) || 0;
     const creditTotal = Number(creditAmount) || 0;    
@@ -59,14 +72,22 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
     const isCreditValid = creditTotal === 0 || (creditTotal > 0 && dueDate !== null);
     const isPaymentComplete = Math.abs(totalEntered - total) < 0.01;
     return isPaymentComplete && isCreditValid;
-  }, [cashAmount, creditAmount, dueDate, total]);
+  }, [cashAmount, creditAmount, dueDate, total]);  
 
-  const handleInputChange = (
-    value: string,
-    setter: React.Dispatch<React.SetStateAction<number | ''>>
-  ) => {
+  const handleCashAmountChange = (value: string) => {
     const parsedValue = parseFloat(value);
-    setter(!isNaN(parsedValue) ? parsedValue : '');
+    setCashAmount(!isNaN(parsedValue) ? parsedValue : '');
+  };
+
+  const handleCreditAmountChange = (value: string) => {
+    const parsedValue = parseFloat(value);
+    setCreditAmount(!isNaN(parsedValue) ? parsedValue : '');
+  };
+
+  const resetForm = () => {
+    setCashAmount(0);
+    setCreditAmount(0);
+    setDueDate(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -133,11 +154,7 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
           description: "Purchase recorded successfully",
         });
         onSuccess?.();
-
-        // Reset form
-        setCashAmount(0);
-        setCreditAmount(0);
-        setDueDate(null);
+        resetForm();
       }
     } catch (error: unknown) {
         if (error instanceof AxiosError) {
@@ -185,24 +202,36 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
           <Input
             type="number"
             min="0"
-            placeholder="Cash Amount"
             value={cashAmount}
             className="w-[240px]"
-            onChange={(e) => handleInputChange(e.target.value, setCashAmount)}
+            onChange={(e) => handleCashAmountChange(e.target.value)}
             disabled={isSubmitting}
           />
           <div></div>
 
           <Label className="text-xs">Credit Amount</Label>
-          <Input
-            type="number"
-            min="0"
-            placeholder="Credit Amount"
-            value={creditAmount}
-            className="w-[240px]"
-            onChange={(e) => handleInputChange(e.target.value, setCreditAmount)}
-            disabled={isSubmitting}
-          />
+          <div className="relative">
+            <Input
+              type="number"
+              min="0"
+              value={creditAmount}
+              className="w-[240px]"
+              onChange={(e) => handleCreditAmountChange(e.target.value)}
+              disabled={isSubmitting}
+            />
+            {paymentSuggestions.suggestedCredit > 0 && (creditAmount === 0 || creditAmount === '') && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="absolute right-1 top-1 h-6 px-2 text-xs text-gray-500 hover:text-gray-700"
+                onClick={() => setCreditAmount(paymentSuggestions.suggestedCredit)}
+                disabled={isSubmitting}
+              >
+                Use {paymentSuggestions.suggestedCredit.toFixed(2)}
+              </Button>
+            )}
+          </div>
           <div></div>
           
           <Label className="text-xs">Due Date</Label>
@@ -222,9 +251,17 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
               <span>Credit:</span>
               <span>Rs. {(Number(creditAmount) || 0).toFixed(2)}</span>
               <span className="font-medium">Total Entered:</span>
-              <span className={`font-medium ${!isPaymentValid ? 'text-red-500' : ''}`}>
-                Rs. {((Number(cashAmount) || 0) + (Number(creditAmount) || 0)).toFixed(2)}
-              </span>
+              <span className="font-medium">Rs. {((Number(cashAmount) || 0) + (Number(creditAmount) || 0)).toFixed(2)}</span>
+              {Math.abs(paymentSuggestions.remainingAfterAll) > 0.01 && (
+                <>
+                  <span className={paymentSuggestions.remainingAfterAll > 0 ? "text-red-600" : "text-green-600"}>
+                    {paymentSuggestions.remainingAfterAll > 0 ? "Remaining:" : "Excess:"}
+                  </span>
+                  <span className={paymentSuggestions.remainingAfterAll > 0 ? "text-red-600" : "text-green-600"}>
+                    Rs. {Math.abs(paymentSuggestions.remainingAfterAll).toFixed(2)}
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -232,11 +269,7 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
       <div className="flex gap-4 justify-end mb-4 mr-4">
         <Button 
           variant="outline" 
-          onClick={() => {
-            setCashAmount(0);
-            setCreditAmount(0);
-            setDueDate(null);
-          }}
+          onClick={resetForm}
           disabled={isSubmitting}
         >
           Reset
