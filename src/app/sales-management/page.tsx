@@ -104,6 +104,7 @@ export default function SalesManagementPage() {
           salesPersonId={selectedSalesPersonId}
           salesPerson={selectedSalesPerson}
           address={address}
+          saleDate={dateRange.startDate}
         />
         </div>
         

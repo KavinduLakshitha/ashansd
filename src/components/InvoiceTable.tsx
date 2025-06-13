@@ -26,6 +26,7 @@ interface InvoiceTableProps {
   salesPersonId?: number;
   salesPerson?: string;
   address?: string;
+  saleDate?: Date;
 }
 
 interface InvoiceRow {
@@ -138,6 +139,7 @@ InvoiceTableRow.displayName = 'InvoiceTableRow';
 export default function InvoiceTable({
   customerId,
   salesPersonId,
+  saleDate,
 }: InvoiceTableProps) {
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -327,6 +329,7 @@ export default function InvoiceTable({
           items={validItems}
           customerID={customerId}
           salesPersonID={salesPersonId}
+          saleDate={saleDate}
           onSuccess={() => {
             setRows(rows.map(row => ({ ...row, quantity: 0, total: 0 })));
             toast({

@@ -30,6 +30,7 @@ interface PaymentDetailsProps {
   }[];
   customerID?: number;
   salesPersonID: number | string | undefined;
+  saleDate?: Date;
   onSuccess?: () => void;
   onError?: (error: string) => void;
 }
@@ -39,6 +40,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
   items, 
   customerID, 
   salesPersonID,
+  saleDate,
   onSuccess,
   onError 
 }) => {
@@ -240,7 +242,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
           customerID,
           salesPersonID,
           products: items,
-          date: new Date(),
+          date: saleDate ? saleDate.toISOString() : new Date().toISOString(),
           discount: discount,
           cashAmount,
           chequePayments,
