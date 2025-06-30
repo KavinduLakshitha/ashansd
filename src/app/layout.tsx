@@ -3,7 +3,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import ClientLayout from "./ClientLayout";
 import { AuthProvider } from "./auth/auth-context";
-import { ThemeProvider as ThemeProvider } from "next-themes"
+import { ThemeProvider } from "next-themes"
 import { Toaster } from "@/components/ui/toaster";
 
 const inter = Inter({
@@ -20,18 +20,12 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={inter.className} suppressHydrationWarning>
       <body suppressHydrationWarning>
-        <ThemeProvider attribute="class" defaultTheme="light" enableSystem>
-          <script dangerouslySetInnerHTML={{ 
-            __html: `
-              (function() {
-                try {
-                  var mode = localStorage.getItem('theme');
-                  if (!mode) return
-                  document.documentElement.classList.add(mode);
-                } catch (e) {}
-              })();
-            `
-          }} />
+        <ThemeProvider 
+          attribute="class" 
+          defaultTheme="light" 
+          enableSystem
+          disableTransitionOnChange
+        >
           <AuthProvider>
             <ClientLayout>{children}</ClientLayout>
           </AuthProvider>
