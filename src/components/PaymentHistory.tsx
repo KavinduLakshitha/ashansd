@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import DatePickerWithRange from './DateRange';
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/auth/auth-context";
-import { Loader2, Search, RefreshCw, Download, Filter, FileDown } from "lucide-react";
+import { Loader2, Search, RefreshCw, Download, Filter, FileDown, Trash2, AlertTriangle } from "lucide-react";
 import api from "@/lib/api/axios";
 import {
   Select,
@@ -25,6 +25,16 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import * as XLSX from 'xlsx';
 import { MonthYearDialog, YearDialog } from './MonthYearSelectors';
 
@@ -42,9 +52,15 @@ interface DateRange {
   to: Date | undefined;
 }
 
+// Delete confirmation dialog state
+interface DeleteConfirmState {
+  isOpen: boolean;
+  paymentToDelete: PaymentStatusChange | null;
+}
+
 const PaymentStatusHistory: React.FC = () => {
   const { toast } = useToast();
-  const { getBusinessLineID } = useAuth();
+  const { user, getBusinessLineID } = useAuth();
   const [activeTab, setActiveTab] = useState<string>("all");
   const [loading, setLoading] = useState<boolean>(true);
   const [statusChanges, setStatusChanges] = useState<PaymentStatusChange[]>([]);
@@ -61,6 +77,11 @@ const PaymentStatusHistory: React.FC = () => {
   const [downloadingMonthly, setDownloadingMonthly] = useState(false);
   const [downloadingYearly, setDownloadingYearly] = useState(false);
   const [downloadingCurrent, setDownloadingCurrent] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState>({
+    isOpen: false,
+    paymentToDelete: null
+  });
+  const [deletingPaymentId, setDeletingPaymentId] = useState<string | null>(null);
   
   const debouncedSearchTerm = useDebounce(searchTerm, 300);  
 
@@ -92,6 +113,7 @@ const PaymentStatusHistory: React.FC = () => {
       params: dateParams
     });
     
+    // Use the imported function from the adapter
     const statusChanges = transformPaymentsToStatusChanges(response.data.payments || []);
     
     setStatusChanges(statusChanges);
@@ -106,7 +128,7 @@ const PaymentStatusHistory: React.FC = () => {
   } finally {
     setLoading(false);
   }
-  }, [getBusinessLineID, dateRange, setStatusChanges, setFilteredChanges, setLoading, toast]);
+}, [getBusinessLineID, dateRange, setStatusChanges, setFilteredChanges, setLoading, toast]);
 
   const filterStatusChanges = useCallback((): void => {
     let result = [...statusChanges];
@@ -901,215 +923,431 @@ const PaymentStatusHistory: React.FC = () => {
     }
   };
 
+const handleDeleteStatusChange = async (change: PaymentStatusChange) => {
+  try {
+      setDeletingPaymentId(change.id.toString());
+      let endpoint: string;
+      let paymentId: string | number;
+
+      console.log('Delete request for change:', {
+        id: change.id,
+        paymentMethod: change.paymentMethod,
+        chequePaymentId: change.chequePaymentId,
+        creditPaymentId: change.creditPaymentId,
+        paymentId: change.paymentId
+      });
+
+      if (change.paymentMethod === 'CHEQUE') {
+        // Try to use chequePaymentId first, then fall back to paymentId
+        if (change.chequePaymentId && change.chequePaymentId !== null && change.chequePaymentId !== undefined) {
+          paymentId = change.chequePaymentId;
+          endpoint = `/payments/cheque/${paymentId}`;
+        } else if (change.paymentId) {
+          // Fallback: use the general paymentId
+          console.warn('Using paymentId as fallback for cheque deletion');
+          paymentId = change.paymentId;
+          endpoint = `/payments/cheque/${paymentId}`;
+        } else {
+          throw new Error('No valid payment ID found for cheque deletion');
+        }
+      } else if (change.paymentMethod === 'CREDIT') {
+        // Try to use creditPaymentId first, then fall back to paymentId
+        if (change.creditPaymentId && change.creditPaymentId !== null && change.creditPaymentId !== undefined) {
+          paymentId = change.creditPaymentId;
+          endpoint = `/payments/credit/${paymentId}`;
+        } else if (change.paymentId) {
+          // Fallback: use the general paymentId
+          console.warn('Using paymentId as fallback for credit deletion');
+          paymentId = change.paymentId;
+          endpoint = `/payments/credit/${paymentId}`;
+        } else {
+          throw new Error('No valid payment ID found for credit deletion');
+        }
+      } else {
+        throw new Error('Unsupported payment method for deletion');
+      }
+
+      console.log(`Attempting to delete payment via: ${endpoint}`);
+      
+      await api.delete(endpoint);
+      
+      // Refresh the data
+      await fetchStatusChanges();
+      
+      toast({
+        title: "Success",
+        description: `${change.paymentMethod === 'CHEQUE' ? 'Cheque' : 'Credit'} payment deleted successfully.`,
+      });
+    } catch (error) {
+      console.error('Error deleting payment:', error);
+      
+      // Provide more specific error messages
+      let errorMessage = "Failed to delete payment. Please try again.";
+      
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "message" in error &&
+        typeof (error as { message?: string }).message === "string"
+      ) {
+        if ((error as { message: string }).message.includes('No valid payment ID')) {
+          errorMessage = "Cannot delete payment: Missing required payment ID. Please refresh and try again.";
+        }
+      } else if (
+        typeof error === "object" &&
+        error !== null &&
+        "response" in error
+      ) {
+        const axiosError = error as {
+          response?: {
+            status?: number;
+            data?: { message?: string };
+          };
+        };
+        if (axiosError.response?.status === 404) {
+          errorMessage = "Payment not found. It may have already been deleted.";
+        } else if (axiosError.response?.status === 403) {
+          errorMessage = "Access denied. You don't have permission to delete this payment.";
+        } else if (axiosError.response?.data?.message) {
+          errorMessage = axiosError.response.data.message;
+        }
+      }
+      
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingPaymentId(null);
+    }
+  };
+
+  const confirmDeleteStatusChange = (change: PaymentStatusChange) => {
+    const isRealized = change.toStatus === 'REALIZED';
+    const isSettled = change.toStatus === 'SETTLED';
+    
+    if (!isRealized && !isSettled) {
+      toast({
+        title: "Cannot Delete",
+        description: "Only realized cheques and settled credits can be deleted.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setDeleteConfirm({
+      isOpen: true,
+      paymentToDelete: change
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (deleteConfirm.paymentToDelete) {
+      await handleDeleteStatusChange(deleteConfirm.paymentToDelete);
+    }
+    setDeleteConfirm({ isOpen: false, paymentToDelete: null });
+  };
+
+  const handleCancelDelete = () => {
+    setDeleteConfirm({ isOpen: false, paymentToDelete: null });
+  };
+
   return (
-    <Card className="w-full shadow-none rounded-tl-none rounded-tr-none border-0">
-      <CardHeader>
-        <CardTitle>Payment Status Changes</CardTitle>
-      </CardHeader>
-      <CardContent className="mt-3">
-        <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="mb-6">
-          <TabsList>
-            <TabsTrigger value="all">All Changes</TabsTrigger>
-            <TabsTrigger value="settled-credits">Settled Credits</TabsTrigger>
-            <TabsTrigger value="realized-cheques">Realized Cheques</TabsTrigger>
-            <TabsTrigger value="bounced-cheques">Bounced Cheques</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        
-        <div className="flex flex-col space-y-4">
-          {/* Filter controls */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            <div>
-              <label className="text-sm font-medium mb-1 block">Search</label>
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search by customer, invoice, cheque..."
-                  className="pl-8"
-                  value={searchTerm}
-                  onChange={handleSearchChange}
-                />
+    <>
+      <Card className="w-full shadow-none rounded-tl-none rounded-tr-none border-0">
+        <CardHeader>
+          <CardTitle>Payment Status Changes</CardTitle>
+        </CardHeader>
+        <CardContent className="mt-3">
+          <Tabs defaultValue="all" value={activeTab} onValueChange={setActiveTab} className="mb-6">
+            <TabsList>
+              <TabsTrigger value="all">All Changes</TabsTrigger>
+              <TabsTrigger value="settled-credits">Settled Credits</TabsTrigger>
+              <TabsTrigger value="realized-cheques">Realized Cheques</TabsTrigger>
+              <TabsTrigger value="bounced-cheques">Bounced Cheques</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          
+          <div className="flex flex-col space-y-4">
+            {/* Filter controls */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+              <div>
+                <label className="text-sm font-medium mb-1 block">Search</label>
+                <div className="relative">
+                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search by customer, invoice, cheque..."
+                    className="pl-8"
+                    value={searchTerm}
+                    onChange={handleSearchChange}
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium mb-1 block">Customer</label>
+                <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="All Customers" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Customers</SelectItem>
+                    {customers.map(customer => (
+                      <SelectItem key={customer.CustomerID} value={customer.CustomerID.toString()}>
+                        {customer.CustomerName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium mb-1 block">Date Range</label>
+                <DatePickerWithRange dateRange={dateRange} onDateRangeChange={handleDateRangeChange} />
               </div>
             </div>
             
-            <div>
-              <label className="text-sm font-medium mb-1 block">Customer</label>
-              <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="All Customers" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Customers</SelectItem>
-                  {customers.map(customer => (
-                    <SelectItem key={customer.CustomerID} value={customer.CustomerID.toString()}>
-                      {customer.CustomerName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            
-            <div>
-              <label className="text-sm font-medium mb-1 block">Date Range</label>
-              <DatePickerWithRange dateRange={dateRange} onDateRangeChange={handleDateRangeChange} />
-            </div>
-          </div>
-          
-          <div className="flex justify-between">
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={applyDateFilters}>
-                <Filter className="h-4 w-4 mr-2" />
-                Apply Filter
-              </Button>
-              <Button variant="outline" onClick={handleRefresh}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                Refresh
-              </Button>
-              <Button 
-                variant="outline" 
-                onClick={exportCurrentView}
-                disabled={downloadingCurrent}
-              >
-                <Download className="h-4 w-4 mr-2" />
-                {downloadingCurrent ? 'Exporting...' : 'Export Current View'}
-              </Button>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Button 
-                variant="outline" 
-                onClick={() => setMonthYearDialogOpen(true)}
-                disabled={downloadingMonthly}
-              >
-                <FileDown className="h-4 w-4 mr-2" />
-                {downloadingMonthly ? 'Downloading...' : 'Monthly Report'}
-              </Button>
+            <div className="flex justify-between">
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={applyDateFilters}>
+                  <Filter className="h-4 w-4 mr-2" />
+                  Apply Filter
+                </Button>
+                <Button variant="outline" onClick={handleRefresh}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={exportCurrentView}
+                  disabled={downloadingCurrent}
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  {downloadingCurrent ? 'Exporting...' : 'Export Current View'}
+                </Button>
+              </div>
               
-              <Button 
-                variant="outline" 
-                onClick={() => setYearDialogOpen(true)}
-                disabled={downloadingYearly}
-              >
-                <FileDown className="h-4 w-4 mr-2" />
-                {downloadingYearly ? 'Downloading...' : 'Yearly Report'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="outline" 
+                  onClick={() => setMonthYearDialogOpen(true)}
+                  disabled={downloadingMonthly}
+                >
+                  <FileDown className="h-4 w-4 mr-2" />
+                  {downloadingMonthly ? 'Downloading...' : 'Monthly Report'}
+                </Button>
+                
+                <Button 
+                  variant="outline" 
+                  onClick={() => setYearDialogOpen(true)}
+                  disabled={downloadingYearly}
+                >
+                  <FileDown className="h-4 w-4 mr-2" />
+                  {downloadingYearly ? 'Downloading...' : 'Yearly Report'}
+                </Button>
+              </div>
             </div>
-          </div>
-          
-          <MonthYearDialog 
-            isOpen={monthYearDialogOpen}
-            onClose={() => setMonthYearDialogOpen(false)}
-            onConfirm={(month, year) => {
-              downloadMonthlyReport(month, year);
-              setMonthYearDialogOpen(false);
-            }}
-          />
+            
+            <MonthYearDialog 
+              isOpen={monthYearDialogOpen}
+              onClose={() => setMonthYearDialogOpen(false)}
+              onConfirm={(month, year) => {
+                downloadMonthlyReport(month, year);
+                setMonthYearDialogOpen(false);
+              }}
+            />
 
-          <YearDialog 
-            isOpen={yearDialogOpen}
-            onClose={() => setYearDialogOpen(false)}
-            onConfirm={(year) => {
-              downloadYearlyReport(year);
-              setYearDialogOpen(false);
-            }}
-          />
-          
-          {/* Status changes table */}
-          {loading ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            </div>
-          ) : (
-            <>
-              <div className="rounded-md border shadow-sm overflow-hidden">
-                <Table className="w-full">
-                  <TableHeader className="bg-gray-50">
-                    <TableRow>
-                      <TableHead className="font-medium">Date</TableHead>
-                      <TableHead className="font-medium">Customer</TableHead>
-                      <TableHead className="font-medium">Invoice</TableHead>
-                      <TableHead className="font-medium">Type</TableHead>
-                      <TableHead className="font-medium">Status Change</TableHead>
-                      <TableHead className="font-medium">Amount</TableHead>
-                      <TableHead className="font-medium">Details</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredChanges.length === 0 ? (
+            <YearDialog 
+              isOpen={yearDialogOpen}
+              onClose={() => setYearDialogOpen(false)}
+              onConfirm={(year) => {
+                downloadYearlyReport(year);
+                setYearDialogOpen(false);
+              }}
+            />
+            
+            {/* Status changes table */}
+            {loading ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : (
+              <>
+                <div className="rounded-md border shadow-sm overflow-hidden">
+                  <Table className="w-full">
+                    <TableHeader className="bg-gray-50">
                       <TableRow>
-                        <TableCell colSpan={7} className="h-24 text-center">
-                          No payment status changes found.
-                        </TableCell>
+                        <TableHead className="font-medium">Date</TableHead>
+                        <TableHead className="font-medium">Customer</TableHead>
+                        <TableHead className="font-medium">Invoice</TableHead>
+                        <TableHead className="font-medium">Type</TableHead>
+                        <TableHead className="font-medium">Status Change</TableHead>
+                        <TableHead className="font-medium">Amount</TableHead>
+                        <TableHead className="font-medium">Details</TableHead>
+                        {user?.userType !== 'management' && (<TableHead className="font-medium text-center">Actions</TableHead>)}
                       </TableRow>
-                    ) : (
-                      filteredChanges.map((change) => (
-                        <TableRow key={change.id} className="hover:bg-gray-50">
-                          <TableCell className="font-medium">
-                            {formatDate(change.date)}
-                          </TableCell>
-                          <TableCell>
-                            {change.customerName}
-                          </TableCell>
-                          <TableCell>
-                            {change.invoiceId || `INV-${change.saleId}`}
-                          </TableCell>
-                          <TableCell>
-                            {getPaymentMethodBadge(change.paymentMethod)}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="text-gray-500">{change.fromStatus}</Badge>
-                              <span className="text-gray-400">→</span>
-                              {getStatusBadge(change.toStatus)}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {formatCurrency(change.amount)}
-                          </TableCell>
-                          <TableCell>
-                            {change.paymentMethod === 'CHEQUE' ? (
-                              <div className="text-sm">
-                                {change.details?.chequeNumber && (
-                                  <div><span className="font-medium">Cheque:</span> {change.details.chequeNumber}</div>
-                                )}
-                                {change.details?.bank && (
-                                  <div><span className="font-medium">Bank:</span> {change.details.bank}</div>
-                                )}
-                                {change.details?.realizeDate && (
-                                  <div><span className="font-medium">Realize Date:</span> {formatDate(change.details.realizeDate)}</div>
-                                )}
-                                {change.details?.bouncedDate && (
-                                  <div><span className="font-medium">Bounced Date:</span> {formatDate(change.details.bouncedDate)}</div>
-                                )}
-                              </div>
-                            ) : change.paymentMethod === 'CREDIT' ? (
-                              <div className="text-sm">
-                                {change.details?.dueDate && (
-                                  <div><span className="font-medium">Due Date:</span> {formatDate(change.details.dueDate)}</div>
-                                )}
-                                {change.details?.settledDate && (
-                                  <div><span className="font-medium">Settled Date:</span> {formatDate(change.details.settledDate)}</div>
-                                )}
-                              </div>
-                            ) : (
-                              <div className="text-sm text-gray-500">-</div>
-                            )}
+                    </TableHeader>
+                    <TableBody>
+                      {filteredChanges.length === 0 ? (
+                        <TableRow>
+                          <TableCell colSpan={user?.userType === 'management' ? 7 : 8} className="h-24 text-center">
+                            No payment status changes found.
                           </TableCell>
                         </TableRow>
-                      ))
+                      ) : (
+                        filteredChanges.map((change) => (
+                          <TableRow key={change.id} className="hover:bg-gray-50">
+                            <TableCell className="font-medium">
+                              {formatDate(change.date)}
+                            </TableCell>
+                            <TableCell>
+                              {change.customerName}
+                            </TableCell>
+                            <TableCell>
+                              {change.invoiceId || `INV-${change.saleId}`}
+                            </TableCell>
+                            <TableCell>
+                              {getPaymentMethodBadge(change.paymentMethod)}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-2">
+                                <Badge variant="outline" className="text-gray-500">{change.fromStatus}</Badge>
+                                <span className="text-gray-400">→</span>
+                                {getStatusBadge(change.toStatus)}
+                              </div>
+                            </TableCell>
+                            <TableCell>
+                              {formatCurrency(change.amount)}
+                            </TableCell>
+                            <TableCell>
+                              {change.paymentMethod === 'CHEQUE' ? (
+                                <div className="text-sm">
+                                  {change.details?.chequeNumber && (
+                                    <div><span className="font-medium">Cheque:</span> {change.details.chequeNumber}</div>
+                                  )}
+                                  {change.details?.bank && (
+                                    <div><span className="font-medium">Bank:</span> {change.details.bank}</div>
+                                  )}
+                                  {change.details?.realizeDate && (
+                                    <div><span className="font-medium">Realize Date:</span> {formatDate(change.details.realizeDate)}</div>
+                                  )}
+                                  {change.details?.bouncedDate && (
+                                    <div><span className="font-medium">Bounced Date:</span> {formatDate(change.details.bouncedDate)}</div>
+                                  )}
+                                </div>
+                              ) : change.paymentMethod === 'CREDIT' ? (
+                                <div className="text-sm">
+                                  {change.details?.dueDate && (
+                                    <div><span className="font-medium">Due Date:</span> {formatDate(change.details.dueDate)}</div>
+                                  )}
+                                  {change.details?.settledDate && (
+                                    <div><span className="font-medium">Settled Date:</span> {formatDate(change.details.settledDate)}</div>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-sm text-gray-500">-</div>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {user?.userType !== 'management' && (
+                              <div className="flex justify-center">
+                                {(change.toStatus === 'REALIZED' || change.toStatus === 'SETTLED') && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => confirmDeleteStatusChange(change)}
+                                    className="hover:bg-red-50 hover:text-red-600"
+                                    title={`Delete ${change.paymentMethod === 'CHEQUE' ? 'Cheque Realization' : 'Credit Settlement'}`}
+                                    disabled={deletingPaymentId === change.id}
+                                  >
+                                    {deletingPaymentId === change.id ? (
+                                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                    ) : (
+                                      <Trash2 className="h-4 w-4" />
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            )}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                
+                <div className="mt-4 text-sm text-gray-500">
+                  Showing {filteredChanges.length} of {statusChanges.length} payment status changes
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteConfirm.isOpen} onOpenChange={() => setDeleteConfirm({ isOpen: false, paymentToDelete: null })}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-red-500" />
+              Delete {deleteConfirm.paymentToDelete?.paymentMethod === 'CHEQUE' ? 'Cheque' : 'Credit'} Payment
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                <p>
+                  Are you sure you want to delete this {deleteConfirm.paymentToDelete?.paymentMethod === 'CHEQUE' ? 'cheque' : 'credit'} payment? 
+                  This action will also delete the associated sale and restore product quantities to inventory.
+                </p>
+                {deleteConfirm.paymentToDelete && (
+                  <div className="mt-3 p-3 bg-gray-50 rounded">
+                    <p><strong>Customer:</strong> {deleteConfirm.paymentToDelete.customerName}</p>
+                    <p><strong>Amount:</strong> {formatCurrency(deleteConfirm.paymentToDelete.amount)}</p>
+                    <p><strong>Invoice:</strong> {deleteConfirm.paymentToDelete.invoiceId || `INV-${deleteConfirm.paymentToDelete.saleId}`}</p>
+                    <p><strong>Status:</strong> {deleteConfirm.paymentToDelete.toStatus}</p>
+                    {deleteConfirm.paymentToDelete.paymentMethod === 'CHEQUE' && deleteConfirm.paymentToDelete.details?.chequeNumber && (
+                      <>
+                        <p><strong>Cheque #:</strong> {deleteConfirm.paymentToDelete.details.chequeNumber}</p>
+                        {deleteConfirm.paymentToDelete.details.bank && (
+                          <p><strong>Bank:</strong> {deleteConfirm.paymentToDelete.details.bank}</p>
+                        )}
+                      </>
                     )}
-                  </TableBody>
-                </Table>
+                    {deleteConfirm.paymentToDelete.paymentMethod === 'CREDIT' && deleteConfirm.paymentToDelete.details?.dueDate && (
+                      <p><strong>Due Date:</strong> {formatDate(deleteConfirm.paymentToDelete.details.dueDate)}</p>
+                    )}
+                  </div>
+                )}
+                <p className="mt-3 text-sm text-orange-600">
+                  <strong>Warning:</strong> This action will:
+                </p>
+                <ul className="mt-1 text-sm text-orange-600 list-disc list-inside">
+                  <li>Permanently delete the payment and associated sale</li>
+                  <li>Restore product quantities to inventory</li>
+                  <li>Remove all related payment records</li>
+                  <li>Delete the entire invoice from the system</li>
+                </ul>
+                <p className="mt-2 text-sm font-medium text-red-600">
+                  This action cannot be undone.
+                </p>
               </div>
-              
-              <div className="mt-4 text-sm text-gray-500">
-                Showing {filteredChanges.length} of {statusChanges.length} payment status changes
-              </div>
-            </>
-          )}
-        </div>
-      </CardContent>
-    </Card>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelDelete}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmDelete}
+              className="bg-red-600 hover:bg-red-700"
+              disabled={deletingPaymentId !== null}
+            >
+              {deletingPaymentId !== null ? 'Deleting...' : 'Delete Payment & Sale'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 };
 

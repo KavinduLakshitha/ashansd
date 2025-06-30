@@ -38,17 +38,17 @@ import Image from "next/image";
 
 // Define all navigation items with role permissions
 const allNavigationItems = [
-    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["superuser", "admin", "manager"] },
-    { name: "Business Line", href: "/businessline-management", icon: Briefcase, roles: ["superuser", "admin"] },
-    { name: "Items", href: "/items-management", icon: Package, roles: ["superuser", "admin", "manager"] },
-    { name: "Stock Adjustment", href: "/stock-adjustment", icon: Box, roles: ["superuser", "admin", "manager"] },
-    { name: "Vendor Management", href: "/vendor-management", icon: Users, roles: ["superuser", "admin", "manager"] },
-    { name: "Customer Management", href: "/customer-management", icon: Users, roles: ["superuser", "admin", "manager"] },
-    { name: "Sales", href: "/sales-management", icon: ShoppingCart, roles: ["superuser", "admin", "manager", "sales"] },
-    { name: "Purchase", href: "/purchase-management", icon: DollarSign, roles: ["superuser", "admin", "manager"] },
-    { name: "Reports", href: "/reports", icon: FileText, roles: ["superuser", "admin", "manager"] },
+    { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard, roles: ["superuser", "admin", "management"] },
+    { name: "Business Line", href: "/businessline-management", icon: Briefcase, roles: ["superuser", "admin", "management"] },
+    { name: "Items", href: "/items-management", icon: Package, roles: ["superuser", "admin", "management"] },
+    { name: "Stock Adjustment", href: "/stock-adjustment", icon: Box, roles: ["superuser", "admin", "management"] },
+    { name: "Vendor Management", href: "/vendor-management", icon: Users, roles: ["superuser", "admin", "management"] },
+    { name: "Customer Management", href: "/customer-management", icon: Users, roles: ["superuser", "admin", "management"] },
+    { name: "Sales", href: "/sales-management", icon: ShoppingCart, roles: ["superuser", "admin", "management", "sales"] },
+    { name: "Purchase", href: "/purchase-management", icon: DollarSign, roles: ["superuser", "admin", "management"] },
+    { name: "Reports", href: "/reports", icon: FileText, roles: ["superuser", "admin", "management"] },
     { name: "Users", href: "/users", icon: Users, roles: ["superuser", "admin"] },
-    { name: "Credit Management", href: "/credit-management", icon: DollarSign, roles: ["superuser", "admin", "manager"] },
+    { name: "Credit Management", href: "/credit-management", icon: DollarSign, roles: ["superuser", "admin", "management"] },
 ];
 
 export function AppSidebar() {

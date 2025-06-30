@@ -34,21 +34,17 @@ export default function SearchableCustomerSelect({
 
   useEffect(() => {
     const id = getBusinessLineID();
-    console.log("Setting Business Line ID:", id);
     setBusinessLineId(id);
   }, [getBusinessLineID]);
 
   const fetchCustomers = useCallback(async () => {
     if (!businessLineId) {
-      console.log("Waiting for business line ID to be available...");
       return;
     }
 
     try {
       setIsLoading(true);
-      setError(null);
-      
-      console.log("Fetching customers with Business Line ID:", businessLineId);
+      setError(null);     
       
       const token = localStorage.getItem('token');
 
@@ -69,16 +65,12 @@ export default function SearchableCustomerSelect({
       console.log("API Response:", response.data);
 
       if (response.data && response.data.data) {
-        // The response has a data wrapper - use it directly since backend already filters by businessLineId
         const customersArray = response.data.data;
-        console.log("Customers from API:", customersArray);
         setCustomers(customersArray);
       } else if (Array.isArray(response.data)) {
-        // Direct array response - filter by businessLineId just in case
         const filteredCustomers = response.data.filter(
           (customer: Customer) => customer.BusinessLineID === businessLineId
         );
-        console.log("Filtered customers:", filteredCustomers);
         setCustomers(filteredCustomers);
       } else {
         console.error('Unexpected API response format:', response.data);
@@ -132,17 +124,6 @@ export default function SearchableCustomerSelect({
     setOpen(false);
     setSearchQuery("");
   };
-
-  // Debug logging
-  console.log("Component state:", {
-    businessLineId,
-    customersCount: customers.length,
-    filteredCount: filteredCustomers.length,
-    isLoading,
-    error,
-    searchQuery
-  });
-
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>

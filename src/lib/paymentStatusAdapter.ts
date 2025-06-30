@@ -14,9 +14,13 @@ interface APIPayment {
     dueDate?: string;
     status?: string;
   };
+  // Add these fields that should come from the backend
+  ChequePaymentID?: number | string;
+  CreditPaymentID?: number | string;
 }
 
 export interface PaymentStatusChange {
+  paymentId: string | number;
   id: string | number;
   date: string;
   customerId: number | string;
@@ -36,28 +40,27 @@ export interface PaymentStatusChange {
     bouncedDate?: string;
     notes?: string;
   };
+  chequePaymentId?: string | number;
+  creditPaymentId?: string | number;
 }
 
 /**
  * Transforms API payment data into status changes
  * 
- * Note: This is a temporary adapter function to simulate payment status changes
- * It should be replaced by actual API endpoints that track status changes directly
+ * Fixed: Now properly assigns chequePaymentId and creditPaymentId for deletions
  */
 export function transformPaymentsToStatusChanges(
   payments: APIPayment[]
 ): PaymentStatusChange[] {
   const statusChanges: PaymentStatusChange[] = [];
 
-  // In a real implementation, we would have actual status change dates and events
-  // Here we're simulating by inferring status changes from payment statuses
   payments.forEach(payment => {
     if (payment.PaymentMethod === 'CHEQUE' && payment.paymentDetails) {
       if (payment.paymentDetails.status === 'REALIZED') {
-        // When a cheque is realized
         statusChanges.push({
           id: `${payment.PaymentID}-realized`,
-          date: payment.PaymentDate, // This should be the actual realized date in production
+          paymentId: payment.PaymentID,
+          date: payment.PaymentDate,
           customerId: payment.CustomerID,
           customerName: payment.CustomerName,
           invoiceId: payment.InvoiceID,
@@ -70,11 +73,14 @@ export function transformPaymentsToStatusChanges(
             chequeNumber: payment.paymentDetails.chequeNumber,
             bank: payment.paymentDetails.bank,
             realizeDate: payment.paymentDetails.realizeDate,
-          }
+          },
+          // FIXED: Use ChequePaymentID for deletion endpoint
+          chequePaymentId: payment.ChequePaymentID
         });
       } else if (payment.paymentDetails.status === 'BOUNCED') {
         statusChanges.push({
           id: `${payment.PaymentID}-bounced`,
+          paymentId: payment.PaymentID,
           date: payment.PaymentDate,
           customerId: payment.CustomerID,
           customerName: payment.CustomerName,
@@ -87,16 +93,18 @@ export function transformPaymentsToStatusChanges(
           details: {
             chequeNumber: payment.paymentDetails.chequeNumber,
             bank: payment.paymentDetails.bank,
-            bouncedDate: payment.PaymentDate, // Mock date, should be actual in production
-          }
+            bouncedDate: payment.PaymentDate,
+          },
+          // FIXED: Use ChequePaymentID for deletion endpoint
+          chequePaymentId: payment.ChequePaymentID
         });
       }
     } else if (payment.PaymentMethod === 'CREDIT' && payment.paymentDetails) {
       if (payment.paymentDetails.status === 'SETTLED') {
-        // When a credit is settled
         statusChanges.push({
           id: `${payment.PaymentID}-settled`,
-          date: payment.PaymentDate, // This should be the actual settled date in production
+          paymentId: payment.PaymentID,
+          date: payment.PaymentDate,
           customerId: payment.CustomerID,
           customerName: payment.CustomerName,
           invoiceId: payment.InvoiceID,
@@ -107,8 +115,10 @@ export function transformPaymentsToStatusChanges(
           toStatus: 'SETTLED',
           details: {
             dueDate: payment.paymentDetails.dueDate,
-            settledDate: payment.PaymentDate, // Mock date, should be actual in production
-          }
+            settledDate: payment.PaymentDate,
+          },
+          // FIXED: Use CreditPaymentID for deletion endpoint
+          creditPaymentId: payment.CreditPaymentID
         });
       }
     }

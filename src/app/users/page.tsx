@@ -155,13 +155,15 @@ export default function UserManagement() {
                       >
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button 
-                        variant="outline" 
-                        size="icon"
-                        onClick={() => handleDelete(user.UserID)}
-                      >
-                        <Trash className="h-4 w-4 text-red-500" />
-                      </Button>
+                      {user?.UserType !== 'management' && (
+                        <Button 
+                          variant="outline" 
+                          size="icon"
+                          onClick={() => handleDelete(user.UserID)}
+                        >
+                          <Trash className="h-4 w-4 text-red-500" />
+                        </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

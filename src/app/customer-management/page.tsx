@@ -507,13 +507,14 @@ export default function CustomerManagement() {
                               >
                                 <Edit className="h-4 w-4" />
                               </Button>
+                              {user?.userType !== 'management' && (
                               <Button 
                                 variant="outline" 
                                 size="icon"
                                 onClick={(e) => initiateDelete(e, customer.CustomerID)}
                               >
                                 <Trash className="h-4 w-4 text-red-500" />
-                              </Button>
+                              </Button>)}
                             </div>
                           </TableCell>
                         </TableRow>

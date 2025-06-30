@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import api from "@/lib/api/axios";
 import { AxiosError } from "axios";
 import VendorDialog from "@/components/AddVendor";
+import { useAuth } from "@/app/auth/auth-context";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -53,6 +54,7 @@ export default function VendorManagement() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const { toast } = useToast();
+  const { user } = useAuth();
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   
   const [vendorToDelete, setVendorToDelete] = useState<DeleteStatus | null>(null);
@@ -210,6 +212,7 @@ export default function VendorManagement() {
                       <Button variant="outline" size="icon" onClick={() => handleEdit(vendor)}>
                         <Edit className="h-4 w-4" />
                       </Button>
+                      {user?.userType !== 'management' && (
                       <Button 
                         variant="outline" 
                         size="icon"
@@ -217,6 +220,7 @@ export default function VendorManagement() {
                       >
                         <Trash className="h-4 w-4 text-red-500" />
                       </Button>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

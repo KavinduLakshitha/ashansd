@@ -51,6 +51,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
   const [creditAmount, setCreditAmount] = useState<number | ''>(0);
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [sendSMS, setSendSMS] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const isStockIn = pathname.includes('purchase-management');
   const totalPayableAmount = total - (discount || 0);
@@ -206,6 +207,8 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+    setIsSubmitting(true); 
   
     // Validate required fields
     if (!customerID) {
@@ -268,7 +271,9 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
         ? error.response.data.message
         : (error as Error).message || 'An error occurred';
       onError?.(errorMessage);
-    }
+    } finally {
+      setIsSubmitting(false);
+  } 
   };
 
   return (
@@ -460,7 +465,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
       </CardContent>
       <div className="flex gap-4 justify-end mb-4 mr-4">
         <Button variant="outline" onClick={handleCancel}>Cancel</Button>
-        <Button onClick={handleSubmit} disabled={!isPaymentValid}>Submit</Button>
+        <Button onClick={handleSubmit} disabled={!isPaymentValid || isSubmitting}>{isSubmitting ? 'Submitting…' : 'Submit'}</Button>
       </div>        
     </Card>
   );

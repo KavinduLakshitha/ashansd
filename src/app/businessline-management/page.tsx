@@ -41,7 +41,7 @@ export default function BusinessLineManagement() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [businessLineToDelete, setBusinessLineToDelete] = useState<number | null>(null);
   const [deleteErrorMessage, setDeleteErrorMessage] = useState<string | null>(null);
-  const { getBusinessLineID } = useAuth();
+  const { user , getBusinessLineID } = useAuth();
 
   const currentUserBusinessLineId = getBusinessLineID();
 
@@ -188,15 +188,17 @@ export default function BusinessLineManagement() {
                       <Button variant="outline" size="icon" onClick={() => handleDialogOpen(row)}>
                         <Edit className="h-4 w-4" />
                       </Button>
-                      <Button 
-                        variant="outline" 
-                        size="icon"
-                        onClick={() => openDeleteDialog(row.BusinessLineID)}
-                        disabled={currentUserBusinessLineId === row.BusinessLineID}
-                        className={currentUserBusinessLineId === row.BusinessLineID ? "opacity-50 cursor-not-allowed" : ""}
-                      >
-                        <Trash className="h-4 w-4 text-red-500" />
-                      </Button>
+                      {user?.userType !== 'management' && (
+                        <Button 
+                          variant="outline" 
+                          size="icon"
+                          onClick={() => openDeleteDialog(row.BusinessLineID)}
+                          disabled={currentUserBusinessLineId === row.BusinessLineID}
+                          className={currentUserBusinessLineId === row.BusinessLineID ? "opacity-50 cursor-not-allowed" : ""}
+                        >
+                          <Trash className="h-4 w-4 text-red-500" />
+                        </Button>
+                      )}                      
                     </div>
                   </TableCell>
                 </TableRow>

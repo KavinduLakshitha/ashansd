@@ -74,7 +74,7 @@ interface SalesPerson {
 }
 
 const SalesTable = () => {
-  const { getBusinessLineID } = useAuth();
+  const { user, getBusinessLineID } = useAuth();
   const [sales, setSales] = useState<Sale[]>([]);
   const [saleItems, setSaleItems] = useState<Record<string, SaleItem[]>>({});
   const [salesPersons, setSalesPersons] = useState<SalesPerson[]>([]);
@@ -1552,7 +1552,7 @@ const SalesTable = () => {
                               >
                                 <FileDown className="h-4 w-4" />
                               </Button>
-                              
+                              {user?.userType !== 'Management' && (
                               <Button
                                 size="sm"
                                 variant="ghost"
@@ -1578,6 +1578,7 @@ const SalesTable = () => {
                                   <Trash2 className="h-4 w-4" />
                                 )}
                               </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
