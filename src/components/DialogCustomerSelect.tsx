@@ -24,7 +24,7 @@ export default function DialogCustomerSelect({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  
+
   const { getBusinessLineID } = useAuth();
 
   // Fetch customers when component mounts
@@ -33,7 +33,7 @@ export default function DialogCustomerSelect({
       try {
         setIsLoading(true);
         setError(null);
-        
+
         const businessLineId = getBusinessLineID();
         const token = localStorage.getItem('token');
 
@@ -41,21 +41,21 @@ export default function DialogCustomerSelect({
           throw new Error('No authentication token found');
         }
 
-        const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/customers`, {
-          params: { businessLineId },
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
+        const response = await axios.get(
+          `${process.env.NEXT_PUBLIC_API_URL}/payments/customers/${businessLineId}`,
+          {
+            headers: { 'Authorization': `Bearer ${token}` }
+          }
+        );
 
         let customersList: Customer[] = [];
-        
-        if (response.data && response.data.data) {
-          customersList = response.data.data;
-        } else if (Array.isArray(response.data)) {
+
+        if (Array.isArray(response.data)) {
           customersList = response.data;
         } else {
           throw new Error('Invalid data format received from server');
         }
-        
+
         setCustomers(customersList);
       } catch (err) {
         console.error('Error fetching customers:', err);
@@ -69,13 +69,15 @@ export default function DialogCustomerSelect({
   }, [getBusinessLineID]);
 
   // Filter customers based on search query
-  const filteredCustomers = customers.filter(customer =>
-    customer.CusName?.toLowerCase().includes(searchQuery.toLowerCase()) ?? false
-  );
+  const filteredCustomers = customers.filter(customer => {
+    const customerName = customer.CustomerName || '';
+    return customerName.toLowerCase().includes(searchQuery.toLowerCase());
+  });
 
   // Handle customer selection
   const handleSelectCustomer = (customer: Customer) => {
-    onChange(customer.CusName, customer.CustomerID);
+    const customerName = customer.CustomerName || '';
+    onChange(customerName, customer.CustomerID);
     if (onSelectCustomer) {
       onSelectCustomer(customer);
     }
@@ -94,7 +96,7 @@ export default function DialogCustomerSelect({
     if (isOpen) {
       document.addEventListener('mousedown', handleClickOutside);
     }
-    
+
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
@@ -146,25 +148,28 @@ export default function DialogCustomerSelect({
             ) : filteredCustomers.length === 0 ? (
               <div className="text-center py-2 text-sm text-gray-500">No customers found</div>
             ) : (
-              filteredCustomers.map((customer) => (
-                <button
-                  key={customer.CustomerID}
-                  type="button"
-                  onClick={() => handleSelectCustomer(customer)}
-                  className={cn(
-                    "flex items-center w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100",
-                    value === customer.CusName && "bg-gray-100"
-                  )}
-                >
-                  <Check
+              filteredCustomers.map((customer) => {
+                const customerName = customer.CustomerName || '';
+                return (
+                  <button
+                    key={customer.CustomerID}
+                    type="button"
+                    onClick={() => handleSelectCustomer(customer)}
                     className={cn(
-                      "mr-2 h-4 w-4",
-                      value === customer.CusName ? "opacity-100" : "opacity-0"
+                      "flex items-center w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100",
+                      value === customerName && "bg-gray-100"
                     )}
-                  />
-                  <span>{customer.CusName}</span>
-                </button>
-              ))
+                  >
+                    <Check
+                      className={cn(
+                        "mr-2 h-4 w-4",
+                        value === customerName ? "opacity-100" : "opacity-0"
+                      )}
+                    />
+                    <span>{customerName}</span>
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
