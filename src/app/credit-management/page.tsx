@@ -33,6 +33,7 @@ import { AxiosError } from 'axios';
 import { toast } from '@/hooks/use-toast';
 import CustomCreditSettlementDialog from '@/components/CustomCreditSettlement';
 import { Trash2, AlertTriangle } from "lucide-react";
+import { DatePicker } from '@/components/ui/date-picker';
 
 interface Cheque {
   ChequePaymentID: string | number;
@@ -96,6 +97,11 @@ const PaymentManagement = () => {
   const [processingIds, setProcessingIds] = useState<Set<string | number>>(new Set());
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>("all");
+  
+  const [dateFilterMode, setDateFilterMode] = useState<'range' | 'upTo'>('range');
+  const [upToDate, setUpToDate] = useState(new Date());
+  const [saleUpToDate, setSaleUpToDate] = useState(new Date());
+
   const [dueDateRange, setDueDateRange] = useState({
     from: new Date(new Date().setDate(new Date().getDate() - 30)),
     to: new Date()
@@ -139,21 +145,48 @@ const PaymentManagement = () => {
           params.append('customerId', selectedCustomer);
       }
       
+      // const dateRange = activeDateFilter === 'due' ? dueDateRange : saleDateRange;
+      
+      // if (dateRange.from) {
+      //   if (activeDateFilter === 'due') {
+      //     params.append('startDate', format(dateRange.from, 'yyyy-MM-dd'));
+      //   } else {
+      //     params.append('saleStartDate', format(dateRange.from, 'yyyy-MM-dd'));
+      //   }
+      // }
+      
+      // if (dateRange.to) {
+      //   if (activeDateFilter === 'due') {
+      //     params.append('endDate', format(dateRange.to, 'yyyy-MM-dd'));
+      //   } else {
+      //     params.append('saleEndDate', format(dateRange.to, 'yyyy-MM-dd'));
+      //   }
+      // }
+
       const dateRange = activeDateFilter === 'due' ? dueDateRange : saleDateRange;
-      
-      if (dateRange.from) {
-        if (activeDateFilter === 'due') {
-          params.append('startDate', format(dateRange.from, 'yyyy-MM-dd'));
-        } else {
-          params.append('saleStartDate', format(dateRange.from, 'yyyy-MM-dd'));
+      const currentUpToDate = activeDateFilter === 'due' ? upToDate : saleUpToDate;
+
+      if (dateFilterMode === 'range') {
+        if (dateRange.from) {
+          if (activeDateFilter === 'due') {
+            params.append('startDate', format(dateRange.from, 'yyyy-MM-dd'));
+          } else {
+            params.append('saleStartDate', format(dateRange.from, 'yyyy-MM-dd'));
+          }
         }
-      }
-      
-      if (dateRange.to) {
+        
+        if (dateRange.to) {
+          if (activeDateFilter === 'due') {
+            params.append('endDate', format(dateRange.to, 'yyyy-MM-dd'));
+          } else {
+            params.append('saleEndDate', format(dateRange.to, 'yyyy-MM-dd'));
+          }
+        }
+      } else if (dateFilterMode === 'upTo') {
         if (activeDateFilter === 'due') {
-          params.append('endDate', format(dateRange.to, 'yyyy-MM-dd'));
+          params.append('endDate', format(currentUpToDate, 'yyyy-MM-dd'));
         } else {
-          params.append('saleEndDate', format(dateRange.to, 'yyyy-MM-dd'));
+          params.append('saleEndDate', format(currentUpToDate, 'yyyy-MM-dd'));
         }
       }
   
@@ -176,7 +209,8 @@ const PaymentManagement = () => {
     } finally {
       setLoading(false);
     }
-  }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, getBusinessLineID]);
+  // }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, getBusinessLineID]);
+  }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, dateFilterMode, upToDate, saleUpToDate, getBusinessLineID]);
     
   useEffect(() => {
     fetchCustomers();
@@ -558,8 +592,25 @@ const PaymentManagement = () => {
                   Due Date Filter
                 </Button>              
               </div>
+
+              <div className="flex gap-2 items-center mt-2">
+                <Button 
+                  variant={dateFilterMode === 'range' ? "default" : "outline"}
+                  onClick={() => setDateFilterMode('range')}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  Date Range
+                </Button>
+                <Button 
+                  variant={dateFilterMode === 'upTo' ? "default" : "outline"}
+                  onClick={() => setDateFilterMode('upTo')}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  Up To Date
+                </Button>              
+              </div>
               
-              {activeDateFilter === 'due' ? (
+              {/* {activeDateFilter === 'due' ? (
                 <div className="flex flex-col gap-1">
                   <span className="text-sm text-gray-500">Payment Due/Realize Date Range</span>
                   <DatePickerWithRange
@@ -582,6 +633,50 @@ const PaymentManagement = () => {
                       }
                     }}
                   />
+                </div>
+              )} */}
+
+              {activeDateFilter === 'due' ? (
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm text-gray-500">
+                    {dateFilterMode === 'range' ? 'Payment Due/Realize Date Range' : 'Due/Realize Up To Date'}
+                  </span>
+                  {dateFilterMode === 'range' ? (
+                    <DatePickerWithRange
+                      selected={dueDateRange}
+                      onChange={(range) => {
+                        if (range?.from && range?.to) {
+                          setDueDateRange({ from: range.from, to: range.to });
+                        }
+                      }}
+                    />
+                  ) : (
+                    <DatePicker
+                      selectedDate={upToDate}
+                      onDateChange={setUpToDate}
+                    />
+                  )}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  <span className="text-sm text-gray-500">
+                    {dateFilterMode === 'range' ? 'Sale Date Range' : 'Sale Up To Date'}
+                  </span>
+                  {dateFilterMode === 'range' ? (
+                    <DatePickerWithRange
+                      selected={saleDateRange}
+                      onChange={(range) => {
+                        if (range?.from && range?.to) {
+                          setSaleDateRange({ from: range.from, to: range.to });
+                        }
+                      }}
+                    />
+                  ) : (
+                    <DatePicker
+                      selectedDate={saleUpToDate}
+                      onDateChange={setSaleUpToDate}
+                    />
+                  )}
                 </div>
               )}
             </div>
