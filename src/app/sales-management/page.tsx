@@ -9,6 +9,14 @@ import SearchableCustomerSelect from "@/components/SearchableCustomerSelect";
 import { Customer } from '@/types/customer';
 import SearchableSalesPersonSelect from "@/components/SearchableSalesPerson";
 
+const formatDateForBackend = (date: Date) => {
+  if (!date) return undefined;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function SalesManagementPage() {  
   const [dateRange, setDateRange] = useState({
     startDate: new Date(),
@@ -104,7 +112,7 @@ export default function SalesManagementPage() {
           salesPersonId={selectedSalesPersonId}
           salesPerson={selectedSalesPerson}
           address={address}
-          saleDate={dateRange.startDate}
+          saleDate={formatDateForBackend(dateRange.startDate)}
         />
         </div>
         

@@ -26,7 +26,7 @@ interface InvoiceTableProps {
   salesPersonId?: number;
   salesPerson?: string;
   address?: string;
-  saleDate?: Date;
+  saleDate?: string;
 }
 
 interface InvoiceRow {
@@ -179,8 +179,6 @@ export default function InvoiceTable({
           throw new Error('Business line ID not found');
         }
 
-        console.log(`Fetching products for customer ${customerId} and business line ${businessLineId}`);
-
         // Include businessLineId as a query parameter
         const response = await axios.get(
           `${process.env.NEXT_PUBLIC_API_URL}/pricelist/customer/${customerId}`,
@@ -194,8 +192,6 @@ export default function InvoiceTable({
           }
         );
 
-        console.log('Product data received:', response.data);
-
         // Transform the data with a unique ID for each row
         const transformedRows = response.data.map((product: Product, index: number) => ({
           ProductID: product.ProductID,
@@ -204,7 +200,6 @@ export default function InvoiceTable({
           unitPrice: product.Price || 0,
           total: 0,
           PriceListID: product.PriceListID,
-          // Create a unique ID using multiple properties and index for extra uniqueness
           uniqueId: `${product.ProductID}-${product.PriceListID || 'noprice'}-${index}-${Date.now()}`
         }));
 
@@ -329,7 +324,7 @@ export default function InvoiceTable({
           items={validItems}
           customerID={customerId}
           salesPersonID={salesPersonId}
-          saleDate={saleDate}
+          saleDate={saleDate} // Now passing string instead of Date
           onSuccess={() => {
             setRows(rows.map(row => ({ ...row, quantity: 0, total: 0 })));
             toast({
