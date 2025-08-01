@@ -170,7 +170,7 @@ const PaymentStatusHistory: React.FC = () => {
   useEffect(() => { 
     fetchCustomers(); 
     fetchStatusChanges(); 
-  }, []);
+  }, [fetchCustomers, fetchStatusChanges]);
 
   useEffect(() => { 
     filterStatusChanges(); 

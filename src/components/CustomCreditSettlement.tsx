@@ -19,10 +19,6 @@ import { AxiosError } from 'axios';
 import { toast } from '@/hooks/use-toast';
 import { Customer } from '@/types/customer';
 import DialogCustomerSelect from './DialogCustomerSelect';
-import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
-import { CalendarIcon } from 'lucide-react';
-import { Calendar } from './ui/calendar';
-import { cn } from '@/lib/utils';
 
 interface Credit {
   CreditPaymentID: string | number;
