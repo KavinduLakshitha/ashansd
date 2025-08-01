@@ -19,6 +19,10 @@ import { AxiosError } from 'axios';
 import { toast } from '@/hooks/use-toast';
 import { Customer } from '@/types/customer';
 import DialogCustomerSelect from './DialogCustomerSelect';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
+import { CalendarIcon } from 'lucide-react';
+import { Calendar } from './ui/calendar';
+import { cn } from '@/lib/utils';
 
 interface Credit {
   CreditPaymentID: string | number;
@@ -60,6 +64,12 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [chequeDetails, setChequeDetails] = useState({
+    chequeNumber: '',
+    bank: '',
+    realizeDate: ''
+  });
 
   // Reset form when dialog opens/closes
   useEffect(() => {
@@ -69,6 +79,12 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       setCustomerCredits(null);
       setPaymentAmount("");
       setError("");
+      setPaymentMethod('CASH');
+      setChequeDetails({
+          chequeNumber: '',
+          bank: '',
+          realizeDate: ''
+      });
     }
   }, [open]);
 
@@ -152,12 +168,18 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     
     setProcessing(true);
     setError('');
+
+    const requestData = {
+      amount: parseFloat(paymentAmount),
+      paymentMethod,
+      ...(paymentMethod === 'CHEQUE' && { chequeDetails })
+    };
     
     try {
-      await axios.post(
-        `${process.env.NEXT_PUBLIC_API_URL}/payments/customer/${selectedCustomerId}/settle-amount`,
-        { amount: parseFloat(paymentAmount) }
-      );
+        await axios.post(
+          `${process.env.NEXT_PUBLIC_API_URL}/payments/customer/${selectedCustomerId}/settle-amount`,
+          requestData
+        );
       
       // Close dialogs
       setConfirmDialogOpen(false);
@@ -220,6 +242,75 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
               Apply a custom payment amount to a customer&apos;s pending credits.
             </DialogDescription>
           </DialogHeader>
+
+          <div className="space-y-3">
+          <Label>Payment Method</Label>
+          <div className="flex space-x-4">
+            <label className="flex items-center space-x-2">
+              <input
+                type="radio"
+                value="CASH"
+                checked={paymentMethod === 'CASH'}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              />
+              <span>Cash</span>
+            </label>
+            <label className="flex items-center space-x-2">
+              <input
+                type="radio"
+                value="CHEQUE"
+                checked={paymentMethod === 'CHEQUE'}
+                onChange={(e) => setPaymentMethod(e.target.value)}
+              />
+              <span>Cheque</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Cheque details - show only when CHEQUE is selected */}
+        {paymentMethod === 'CHEQUE' && (
+            <div className="space-y-3 border p-3 rounded">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="cheque-number">Cheque Number</Label>
+                  <Input
+                    id="cheque-number"
+                    value={chequeDetails.chequeNumber}
+                    onChange={(e) => setChequeDetails(prev => ({
+                      ...prev,
+                      chequeNumber: e.target.value
+                    }))}
+                    placeholder="Enter cheque number"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="bank">Bank</Label>
+                  <Input
+                    id="bank"
+                    value={chequeDetails.bank}
+                    onChange={(e) => setChequeDetails(prev => ({
+                      ...prev,
+                      bank: e.target.value
+                    }))}
+                    placeholder="Enter bank name"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label htmlFor="realize-date">Realize Date</Label>
+                <Input
+                  id="realize-date"
+                  type="date"
+                  value={chequeDetails.realizeDate}
+                  onChange={(e) => setChequeDetails(prev => ({
+                    ...prev,
+                    realizeDate: e.target.value
+                  }))}
+                  className="w-full"
+                />
+              </div>
+            </div>
+          )}
           
           <div className="py-4 space-y-4">
             {/* Custom Customer Selection */}
