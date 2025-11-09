@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Button } from "@/components/ui/button";
 import { Table, TableHeader, TableHead, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { 
@@ -12,6 +12,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/app/auth/auth-context";
 import axios from '@/lib/api/axios';
 import { format } from 'date-fns';
@@ -57,7 +59,6 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   const [customerCredits, setCustomerCredits] = useState<CustomerWithCredits | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [paymentAmount, setPaymentAmount] = useState<string>('');
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('CASH');
@@ -66,6 +67,9 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     bank: '',
     realizeDate: ''
   });
+  const [selectedCredits, setSelectedCredits] = useState<
+    Array<{ credit: Credit; amount: string }>
+  >([]);
 
   // Reset form when dialog opens/closes
   useEffect(() => {
@@ -73,7 +77,6 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       setSelectedCustomerId("");
       setSelectedCustomerName("");
       setCustomerCredits(null);
-      setPaymentAmount("");
       setError("");
       setPaymentMethod('CASH');
       setChequeDetails({
@@ -81,6 +84,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           bank: '',
           realizeDate: ''
       });
+      setSelectedCredits([]);
     }
   }, [open]);
 
@@ -89,6 +93,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     const fetchCustomerCredits = async () => {
       if (!selectedCustomerId || !open) {
         setCustomerCredits(null);
+        setSelectedCredits([]);
         return;
       }
       
@@ -128,25 +133,136 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     fetchCustomerCredits();
   }, [selectedCustomerId, getBusinessLineID, open]);
 
-  const handleAmountChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Allow only numbers and decimal point
-    const value = e.target.value.replace(/[^0-9.]/g, '');
-    
-    // Ensure only one decimal point
-    const parts = value.split('.');
+  const toggleCreditSelection = (credit: Credit) => {
+    setSelectedCredits((prev) => {
+      const existingIndex = prev.findIndex(
+        (item) => item.credit.CreditPaymentID === credit.CreditPaymentID
+      );
+
+      if (existingIndex > -1) {
+        return prev.filter(
+          (item) => item.credit.CreditPaymentID !== credit.CreditPaymentID
+        );
+      }
+
+      return [
+        ...prev,
+        {
+          credit,
+          amount: Number(credit.Amount).toFixed(2),
+        },
+      ];
+    });
+  };
+
+  const handleCreditAmountChange = (
+    credit: Credit,
+    rawValue: string
+  ) => {
+    const sanitized = rawValue.replace(/[^0-9.]/g, '');
+    const parts = sanitized.split('.');
     if (parts.length > 2) {
       return;
     }
-    
-    setPaymentAmount(value);
+    const normalized =
+      parts.length === 2
+        ? `${parts[0]}.${parts[1].slice(0, 2)}`
+        : sanitized;
+
+    setSelectedCredits((prev) =>
+      prev.map((item) =>
+        item.credit.CreditPaymentID === credit.CreditPaymentID
+          ? { ...item, amount: normalized }
+          : item
+      )
+    );
   };
 
+  const handleCreditAmountBlur = (credit: Credit, value: string) => {
+    const numeric = parseFloat(value);
+    const maxAmount = Number(credit.Amount);
+
+    if (!value || isNaN(numeric) || numeric <= 0) {
+      setSelectedCredits((prev) =>
+        prev.map((item) =>
+          item.credit.CreditPaymentID === credit.CreditPaymentID
+            ? { ...item, amount: '' }
+            : item
+        )
+      );
+      return;
+    }
+
+    const clamped = Math.min(numeric, maxAmount);
+    setSelectedCredits((prev) =>
+      prev.map((item) =>
+        item.credit.CreditPaymentID === credit.CreditPaymentID
+          ? { ...item, amount: clamped.toFixed(2) }
+          : item
+      )
+    );
+  };
+
+  const selectedCreditMap = useMemo(() => {
+    const map = new Map<
+      string,
+      { index: number; amount: string; credit: Credit }
+    >();
+
+    selectedCredits.forEach((item, index) => {
+      map.set(item.credit.CreditPaymentID.toString(), {
+        index,
+        amount: item.amount,
+        credit: item.credit,
+      });
+    });
+
+    return map;
+  }, [selectedCredits]);
+
+  const totalSelectedAmount = useMemo(() => {
+    return selectedCredits.reduce((sum, item) => {
+      const value = parseFloat(item.amount);
+      if (isNaN(value)) {
+        return sum;
+      }
+      return sum + value;
+    }, 0);
+  }, [selectedCredits]);
+
+  const hasInvalidSelection = useMemo(() => {
+    if (selectedCredits.length === 0) {
+      return true;
+    }
+
+    return selectedCredits.some((item) => {
+      const value = parseFloat(item.amount);
+      if (!item.amount || isNaN(value) || value <= 0) {
+        return true;
+      }
+      return value - Number(item.credit.Amount) > 0.009;
+    });
+  }, [selectedCredits]);
+
   const handleOpenConfirmDialog = () => {
-    if (!paymentAmount || parseFloat(paymentAmount) <= 0) {
+    if (selectedCredits.length === 0 || totalSelectedAmount <= 0 || hasInvalidSelection) {
       toast({
         variant: "destructive",
         title: "Invalid Amount",
-        description: "Please enter a valid payment amount greater than zero.",
+        description: "Please select at least one credit and enter a valid amount to settle.",
+        duration: 3000,
+      });
+      return;
+    }
+
+    if (
+      paymentMethod === 'CHEQUE' &&
+      (!chequeDetails.chequeNumber || !chequeDetails.bank || !chequeDetails.realizeDate)
+    ) {
+      toast({
+        variant: "destructive",
+        title: "Missing Cheque Details",
+        description: "Cheque number, bank and realize date are required for cheque payments.",
         duration: 3000,
       });
       return;
@@ -160,14 +276,25 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   };
 
   const handleSettleAmount = async () => {
-    if (!selectedCustomerId || !paymentAmount) return;
+    if (
+      !selectedCustomerId ||
+      selectedCredits.length === 0 ||
+      totalSelectedAmount <= 0 ||
+      hasInvalidSelection
+    ) {
+      return;
+    }
     
     setProcessing(true);
     setError('');
 
     const requestData = {
-      amount: parseFloat(paymentAmount),
+      amount: parseFloat(totalSelectedAmount.toFixed(2)),
       paymentMethod,
+      selectedCredits: selectedCredits.map((item) => ({
+        creditPaymentId: item.credit.CreditPaymentID,
+        amount: parseFloat(item.amount),
+      })),
       ...(paymentMethod === 'CHEQUE' && { chequeDetails })
     };
     
@@ -190,6 +317,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       
       // Notify parent component to refresh its data
       onSuccess();
+      setSelectedCredits([]);
       
     } catch (err) {
       console.error('Error settling credits:', err);
@@ -220,12 +348,14 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     setSelectedCustomerName(value);
     if (customerId) {
       setSelectedCustomerId(customerId.toString());
+      setSelectedCredits([]);
     }
   };
 
   const handleSelectCustomer = (customer: Customer) => {
     setSelectedCustomerId(customer.CustomerID.toString());
     setSelectedCustomerName(customer.CusName);
+    setSelectedCredits([]);
   };
 
   return (
@@ -353,41 +483,107 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                   <Table className="border">
                     <TableHeader className="bg-gray-50">
                       <TableRow>
+                        <TableHead className="w-12 text-center">Select</TableHead>
+                        <TableHead className="w-16 text-center">Order</TableHead>
                         <TableHead className="w-1/3">Due Date</TableHead>
-                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="text-right">Outstanding</TableHead>
+                        <TableHead className="text-right">Settle Amount</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {customerCredits.pendingCredits.map((credit) => (
-                        <TableRow key={credit.CreditPaymentID}>
-                          <TableCell>
-                            {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            Rs. {Number(credit.Amount).toFixed(2)}
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {customerCredits.pendingCredits.map((credit) => {
+                        const selection = selectedCreditMap.get(
+                          credit.CreditPaymentID?.toString() ?? ''
+                        );
+                        const isSelected = Boolean(selection);
+                        const amountValue = selection?.amount ?? '';
+                        const outstanding = Number(credit.Amount);
+                        const amountNumeric = parseFloat(amountValue);
+                        const isAmountInvalid =
+                          isSelected &&
+                          (!amountValue ||
+                            isNaN(amountNumeric) ||
+                            amountNumeric <= 0 ||
+                            amountNumeric - outstanding > 0.009);
+
+                        return (
+                          <TableRow
+                            key={credit.CreditPaymentID}
+                            className={isSelected ? "bg-blue-50/50" : undefined}
+                          >
+                            <TableCell className="text-center">
+                              <Checkbox
+                                aria-label="Select credit"
+                                checked={isSelected}
+                                onCheckedChange={() => toggleCreditSelection(credit)}
+                              />
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {isSelected ? (
+                                <Badge variant="secondary">
+                                  {(selection?.index ?? 0) + 1}
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  -
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              Rs. {outstanding.toFixed(2)}
+                            </TableCell>
+                            <TableCell>
+                              {isSelected ? (
+                                <div className="flex flex-col space-y-1">
+                                  <Input
+                                    inputMode="decimal"
+                                    value={amountValue}
+                                    onChange={(e) =>
+                                      handleCreditAmountChange(credit, e.target.value)
+                                    }
+                                    onBlur={(e) =>
+                                      handleCreditAmountBlur(credit, e.target.value)
+                                    }
+                                  />
+                                  {isAmountInvalid && (
+                                    <span className="text-xs text-red-500">
+                                      Enter amount up to Rs. {outstanding.toFixed(2)}
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  Not selected
+                                </span>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
                 
                 {/* Payment Entry */}
                 <div className="space-y-3 mt-4">
-                  <div className="flex flex-col space-y-2">
-                    <Label htmlFor="payment-amount">Payment Amount (Rs.)</Label>
-                    <Input
-                      id="payment-amount"
-                      type="text"
-                      placeholder="Enter amount"
-                      value={paymentAmount}
-                      onChange={handleAmountChange}
-                    />
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-gray-700">
+                      Total Selected Amount
+                    </p>
+                    <p className="text-lg font-semibold text-gray-900">
+                      Rs. {totalSelectedAmount.toFixed(2)}
+                    </p>
                   </div>
-                  
+                  {hasInvalidSelection && selectedCredits.length > 0 && (
+                    <p className="text-xs text-red-500">
+                      Please enter a valid amount (greater than zero and not exceeding the outstanding amount) for each selected credit.
+                    </p>
+                  )}
                   <p className="text-sm text-gray-500 italic">
-                    Payment will be applied to the oldest credits first. 
-                    A partial payment will be applied to the oldest credit and any remaining amount will be applied to subsequent credits.
+                    Credits will be settled in the order selected. Partial settlements create a new pending credit for the remaining balance.
                   </p>
                 </div>
               </>
@@ -412,10 +608,18 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
             </Button>
             <Button 
               onClick={handleOpenConfirmDialog}
-              disabled={!selectedCustomerId || !paymentAmount || 
-                        parseFloat(paymentAmount) <= 0 || 
-                        !customerCredits || 
-                        customerCredits.pendingCredits.length === 0}
+              disabled={
+                !selectedCustomerId ||
+                !customerCredits ||
+                customerCredits.pendingCredits.length === 0 ||
+                selectedCredits.length === 0 ||
+                hasInvalidSelection ||
+                totalSelectedAmount <= 0 ||
+                (paymentMethod === 'CHEQUE' &&
+                  (!chequeDetails.chequeNumber ||
+                    !chequeDetails.bank ||
+                    !chequeDetails.realizeDate))
+              }
               className="mt-2"
             >
               Apply Payment
@@ -430,11 +634,25 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           <DialogHeader>
             <DialogTitle>Confirm Payment</DialogTitle>
             <DialogDescription>
-              You are about to apply a payment of Rs. {paymentAmount} 
+              You are about to settle Rs. {totalSelectedAmount.toFixed(2)} 
               {customerCredits && ` for ${customerCredits.customerDetails.CusName}`}.
-              This will settle credits starting from the oldest first.
+              Credits will be settled in the exact order they were selected.
             </DialogDescription>
           </DialogHeader>
+          {selectedCredits.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <p className="text-sm font-medium text-gray-700">Selected Credits</p>
+              <ul className="list-disc pl-5 space-y-1 text-sm text-gray-600">
+                {selectedCredits.map((item, index) => (
+                  <li key={item.credit.CreditPaymentID}>
+                    <span className="font-medium">#{index + 1}</span> · Due{" "}
+                    {format(new Date(item.credit.DueDate), 'yyyy-MM-dd')} · Settling Rs.{" "}
+                    {parseFloat(item.amount || '0').toFixed(2)}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <DialogFooter className="mt-4 gap-2">
             <Button
               variant="outline"
