@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ChevronDown, ChevronRight, Filter, FileDown, Trash2, AlertTriangle } from "lucide-react";
+import { ChevronDown, ChevronRight, Filter, FileDown, Trash2, AlertTriangle, CalendarDays } from "lucide-react";
 import { DateRange } from "react-day-picker";
 import { addDays, format } from "date-fns";
 import { parseISO } from "date-fns";
@@ -26,6 +26,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Calendar } from "@/components/ui/calendar";
 import { toast } from '@/hooks/use-toast';
 
 interface PaymentDetails {
@@ -103,6 +112,18 @@ const SalesTable = () => {
   const [downloadingExcel, setDownloadingExcel] = useState(false);
   const [downloadingMonthly, setDownloadingMonthly] = useState(false);
   const [downloadingYearly, setDownloadingYearly] = useState(false);
+  const [editDialog, setEditDialog] = useState<{
+    open: boolean;
+    saleId: string | null;
+    invoiceId: string;
+    date: Date | null;
+  }>({
+    open: false,
+    saleId: null,
+    invoiceId: '',
+    date: null,
+  });
+  const [updatingInvoiceDate, setUpdatingInvoiceDate] = useState(false);
 
   // Function to adjust the end date to include the entire day
   const adjustDateRange = (dateRange: DateRange | undefined): { 
@@ -180,6 +201,74 @@ const SalesTable = () => {
   const handleDeleteClick = (saleId: string, invoiceId: string, customerName: string) => {
     setSaleToDelete({ saleId, invoiceId, customerName });
     setDeleteDialogOpen(true);
+  };
+
+  const resetEditDialogState = () => {
+    setEditDialog({
+      open: false,
+      saleId: null,
+      invoiceId: '',
+      date: null
+    });
+  };
+
+  const openEditInvoiceDateDialog = (saleId: string, invoiceId: string, paymentDate: string) => {
+    setEditDialog({
+      open: true,
+      saleId,
+      invoiceId,
+      date: paymentDate ? new Date(paymentDate) : new Date()
+    });
+  };
+
+  const handleEditDialogOpenChange = (open: boolean) => {
+    if (!open && !updatingInvoiceDate) {
+      resetEditDialogState();
+    } else if (open) {
+      setEditDialog(prev => ({
+        ...prev,
+        open: true
+      }));
+    }
+  };
+
+  const handleInvoiceDateUpdate = async () => {
+    if (!editDialog.saleId || !editDialog.date) {
+      return;
+    }
+
+    try {
+      setUpdatingInvoiceDate(true);
+      const formattedDate = format(editDialog.date, 'yyyy-MM-dd');
+
+      await axios.put(
+        `${process.env.NEXT_PUBLIC_API_URL}/sales/${editDialog.saleId}/date`,
+        { newDate: formattedDate }
+      );
+
+      const isoDate = new Date(`${formattedDate}T00:00:00`).toISOString();
+
+      setSales(prevSales =>
+        prevSales.map(sale =>
+          sale.SaleID === editDialog.saleId
+            ? { ...sale, PaymentDate: isoDate }
+            : sale
+        )
+      );
+
+      toast({ description: 'Invoice date updated successfully' });
+      resetEditDialogState();
+    } catch (error: unknown) {
+      console.error('Error updating invoice date:', error);
+      let errorMessage = 'Failed to update invoice date';
+      if (typeof error === 'object' && error !== null && 'response' in error) {
+        const err = error as { response?: { data?: { message?: string } } };
+        errorMessage = err.response?.data?.message || errorMessage;
+      }
+      toast({ description: errorMessage });
+    } finally {
+      setUpdatingInvoiceDate(false);
+    }
   };
 
   useEffect(() => {
@@ -1473,6 +1562,44 @@ const SalesTable = () => {
           </AlertDialogContent>
         </AlertDialog>
 
+        <Dialog open={editDialog.open} onOpenChange={handleEditDialogOpenChange}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Edit Invoice Date</DialogTitle>
+              <DialogDescription>
+                Choose a new invoice date for <span className="font-medium">{editDialog.invoiceId || 'this invoice'}</span>.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-4 flex justify-center">
+              <Calendar
+                mode="single"
+                selected={editDialog.date ?? undefined}
+                onSelect={(date) =>
+                  setEditDialog(prev => ({
+                    ...prev,
+                    date: date ?? prev.date
+                  }))
+                }
+              />
+            </div>
+            <DialogFooter className="mt-2 gap-2">
+              <Button
+                variant="outline"
+                onClick={resetEditDialogState}
+                disabled={updatingInvoiceDate}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleInvoiceDateUpdate}
+                disabled={updatingInvoiceDate || !editDialog.date}
+              >
+                {updatingInvoiceDate ? 'Updating...' : 'Update Date'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
         <div className="rounded-md border">
           <Table>
             <TableHeader>
@@ -1551,6 +1678,17 @@ const SalesTable = () => {
                                 title="Download Invoice"
                               >
                                 <FileDown className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openEditInvoiceDateDialog(saleId, invoiceId, firstSale.PaymentDate);
+                                }}
+                                title="Edit Invoice Date"
+                              >
+                                <CalendarDays className="h-4 w-4" />
                               </Button>
                               {user?.userType !== 'Management' && (
                               <Button

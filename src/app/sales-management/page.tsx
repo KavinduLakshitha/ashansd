@@ -40,8 +40,6 @@ export default function SalesManagementPage() {
     setAddress(customer.Address || "");
     setContactPerson(customer.ContactPersonName || "");
     setSelectedCustomerId(customer.CustomerID);
-    setSelectedSalesPerson("");
-    setSelectedSalesPersonId(undefined);
   };
 
   const resetCustomerFields = () => {
