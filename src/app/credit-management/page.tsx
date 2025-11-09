@@ -98,9 +98,11 @@ const PaymentManagement = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>("all");
   
-  const [dateFilterMode, setDateFilterMode] = useState<'range' | 'upTo'>('range');
+  const [dateFilterMode, setDateFilterMode] = useState<'range' | 'upTo' | 'on'>('range');
   const [upToDate, setUpToDate] = useState(new Date());
   const [saleUpToDate, setSaleUpToDate] = useState(new Date());
+  const [dueOnDate, setDueOnDate] = useState(new Date());
+  const [saleOnDate, setSaleOnDate] = useState(new Date());
 
   const [dueDateRange, setDueDateRange] = useState({
     from: new Date(new Date().setDate(new Date().getDate() - 30)),
@@ -165,6 +167,7 @@ const PaymentManagement = () => {
 
       const dateRange = activeDateFilter === 'due' ? dueDateRange : saleDateRange;
       const currentUpToDate = activeDateFilter === 'due' ? upToDate : saleUpToDate;
+      const currentOnDate = activeDateFilter === 'due' ? dueOnDate : saleOnDate;
 
       if (dateFilterMode === 'range') {
         if (dateRange.from) {
@@ -188,6 +191,14 @@ const PaymentManagement = () => {
         } else {
           params.append('saleEndDate', format(currentUpToDate, 'yyyy-MM-dd'));
         }
+      } else if (dateFilterMode === 'on') {
+        if (activeDateFilter === 'due') {
+          params.append('startDate', format(currentOnDate, 'yyyy-MM-dd'));
+          params.append('endDate', format(currentOnDate, 'yyyy-MM-dd'));
+        } else {
+          params.append('saleStartDate', format(currentOnDate, 'yyyy-MM-dd'));
+          params.append('saleEndDate', format(currentOnDate, 'yyyy-MM-dd'));
+        }
       }
   
       const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/payments/pending/${businessLineId}?${params.toString()}`);
@@ -210,7 +221,7 @@ const PaymentManagement = () => {
       setLoading(false);
     }
   // }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, getBusinessLineID]);
-  }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, dateFilterMode, upToDate, saleUpToDate, getBusinessLineID]);
+  }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, dateFilterMode, upToDate, saleUpToDate, dueOnDate, saleOnDate, getBusinessLineID]);
     
   useEffect(() => {
     fetchCustomers();
@@ -607,7 +618,14 @@ const PaymentManagement = () => {
                   className="text-xs px-2 py-1 h-auto"
                 >
                   Up To Date
-                </Button>              
+                </Button>  
+                <Button 
+                  variant={dateFilterMode === 'on' ? "default" : "outline"}
+                  onClick={() => setDateFilterMode('on')}
+                  className="text-xs px-2 py-1 h-auto"
+                >
+                  On Date
+                </Button>            
               </div>
               
               {/* {activeDateFilter === 'due' ? (
@@ -639,7 +657,7 @@ const PaymentManagement = () => {
               {activeDateFilter === 'due' ? (
                 <div className="flex flex-col gap-1">
                   <span className="text-sm text-gray-500">
-                    {dateFilterMode === 'range' ? 'Payment Due/Realize Date Range' : 'Due/Realize Up To Date'}
+                    {dateFilterMode === 'range' ? 'Payment Due/Realize Date Range' : dateFilterMode === 'upTo' ? 'Due/Realize Up To Date' : 'Due/Realize On Date'}
                   </span>
                   {dateFilterMode === 'range' ? (
                     <DatePickerWithRange
@@ -650,17 +668,22 @@ const PaymentManagement = () => {
                         }
                       }}
                     />
-                  ) : (
+                  ) : dateFilterMode === 'upTo' ? (
                     <DatePicker
                       selectedDate={upToDate}
                       onDateChange={setUpToDate}
+                    />
+                  ) : (
+                    <DatePicker
+                      selectedDate={dueOnDate}
+                      onDateChange={setDueOnDate}
                     />
                   )}
                 </div>
               ) : (
                 <div className="flex flex-col gap-1">
                   <span className="text-sm text-gray-500">
-                    {dateFilterMode === 'range' ? 'Sale Date Range' : 'Sale Up To Date'}
+                    {dateFilterMode === 'range' ? 'Sale Date Range' : dateFilterMode === 'upTo' ? 'Sale Up To Date' : 'Sale On Date'}
                   </span>
                   {dateFilterMode === 'range' ? (
                     <DatePickerWithRange
@@ -671,10 +694,15 @@ const PaymentManagement = () => {
                         }
                       }}
                     />
-                  ) : (
+                  ) : dateFilterMode === 'upTo' ? (
                     <DatePicker
                       selectedDate={saleUpToDate}
                       onDateChange={setSaleUpToDate}
+                    />
+                  ) : (
+                    <DatePicker
+                      selectedDate={saleOnDate}
+                      onDateChange={setSaleOnDate}
                     />
                   )}
                 </div>
