@@ -70,8 +70,11 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     realizeDate: ''
   });
   const [selectedCredits, setSelectedCredits] = useState<
-    Array<{ credit: Credit; amount: string }>
+    Array<{ credit: Credit; amount: string; suggestedAmount?: string }>
   >([]);
+  const [totalPaymentAmount, setTotalPaymentAmount] = useState<string>("");
+  const [suggestedTotalPayment, setSuggestedTotalPayment] = useState<string>("");
+  const [distributionMode, setDistributionMode] = useState<'manual' | 'auto'>('auto');
 
   // Reset form when dialog opens/closes
   useEffect(() => {
@@ -87,6 +90,9 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           realizeDate: ''
       });
       setSelectedCredits([]);
+      setTotalPaymentAmount("");
+      setSuggestedTotalPayment("");
+      setDistributionMode('auto');
     }
   }, [open]);
 
@@ -142,25 +148,153 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       );
 
       if (existingIndex > -1) {
-        return prev.filter(
+        // Unselecting - remove from list and update suggested total
+        const removedCredit = prev[existingIndex];
+        const newCredits = prev.filter(
           (item) => item.credit.CreditPaymentID !== credit.CreditPaymentID
         );
+        
+        // Update suggested total payment
+        const removedAmount = parseFloat(removedCredit.suggestedAmount || removedCredit.amount || '0');
+        if (!isNaN(removedAmount)) {
+          const currentSuggested = parseFloat(suggestedTotalPayment || '0');
+          const newSuggested = Math.max(0, currentSuggested - removedAmount);
+          setSuggestedTotalPayment(newSuggested > 0 ? newSuggested.toFixed(2) : '');
+        }
+        
+        // Re-distribute if in auto mode and total payment is set
+        if (distributionMode === 'auto' && totalPaymentAmount) {
+          const totalAmount = parseFloat(totalPaymentAmount);
+          if (!isNaN(totalAmount) && totalAmount > 0) {
+            return distributePaymentAmount(newCredits, totalAmount);
+          }
+        }
+        return newCredits;
       }
 
-      return [
+      // Selecting - add to list with suggested amount
+      const suggestedAmount = Number(credit.Amount).toFixed(2);
+      const newCredits = [
         ...prev,
         {
           credit,
-          amount: Number(credit.Amount).toFixed(2),
+          amount: '', // Start with empty amount
+          suggestedAmount: suggestedAmount, // Suggest full outstanding amount
         },
       ];
+      
+      // Update suggested total payment
+      const creditAmount = parseFloat(suggestedAmount);
+      if (!isNaN(creditAmount)) {
+        const currentSuggested = parseFloat(suggestedTotalPayment || '0');
+        const newSuggested = currentSuggested + creditAmount;
+        setSuggestedTotalPayment(newSuggested.toFixed(2));
+      }
+      
+      // Re-distribute if in auto mode and total payment is set
+      if (distributionMode === 'auto' && totalPaymentAmount) {
+        const totalAmount = parseFloat(totalPaymentAmount);
+        if (!isNaN(totalAmount) && totalAmount > 0) {
+          return distributePaymentAmount(newCredits, totalAmount);
+        }
+      }
+      return newCredits;
     });
+  };
+
+  // Function to automatically distribute payment across selected credits
+  const distributePaymentAmount = (
+    credits: Array<{ credit: Credit; amount: string; suggestedAmount?: string }>,
+    totalAmount: number
+  ): Array<{ credit: Credit; amount: string; suggestedAmount?: string }> => {
+    if (isNaN(totalAmount) || totalAmount <= 0 || credits.length === 0) {
+      return credits.map(item => ({ ...item, amount: '' }));
+    }
+
+    let remainingAmount = totalAmount;
+    const distributed = credits.map((item) => {
+      const creditAmount = Number(item.credit.Amount);
+      if (remainingAmount <= 0) {
+        return { ...item, amount: '', suggestedAmount: item.suggestedAmount };
+      }
+      
+      if (remainingAmount >= creditAmount) {
+        // Fully settle this credit
+        remainingAmount -= creditAmount;
+        return { ...item, amount: creditAmount.toFixed(2), suggestedAmount: item.suggestedAmount };
+      } else {
+        // Partially settle this credit
+        const partialAmount = remainingAmount;
+        remainingAmount = 0;
+        return { ...item, amount: partialAmount.toFixed(2), suggestedAmount: item.suggestedAmount };
+      }
+    });
+
+    return distributed;
+  };
+
+  // Handle accepting suggested amount for a credit
+  const acceptSuggestedAmount = (credit: Credit) => {
+    setSelectedCredits((prev) =>
+      prev.map((item) =>
+        item.credit.CreditPaymentID === credit.CreditPaymentID
+          ? { ...item, amount: item.suggestedAmount || '' }
+          : item
+      )
+    );
+    setDistributionMode('manual');
+  };
+
+  // Handle accepting suggested total payment
+  const acceptSuggestedTotalPayment = () => {
+    setTotalPaymentAmount(suggestedTotalPayment);
+    setDistributionMode('auto');
+    if (selectedCredits.length > 0) {
+      const totalAmount = parseFloat(suggestedTotalPayment);
+      if (!isNaN(totalAmount) && totalAmount > 0) {
+        const distributed = distributePaymentAmount(selectedCredits, totalAmount);
+        setSelectedCredits(distributed);
+      }
+    }
+  };
+
+  // Handle total payment amount change
+  const handleTotalPaymentChange = (value: string) => {
+    const sanitized = value.replace(/[^0-9.]/g, '');
+    const parts = sanitized.split('.');
+    if (parts.length > 2) {
+      return;
+    }
+    const normalized =
+      parts.length === 2
+        ? `${parts[0]}.${parts[1].slice(0, 2)}`
+        : sanitized;
+
+    setTotalPaymentAmount(normalized);
+    setDistributionMode('auto');
+
+    // Automatically distribute when user enters amount
+    if (selectedCredits.length > 0) {
+      const totalAmount = parseFloat(normalized);
+      if (!isNaN(totalAmount) && totalAmount > 0) {
+        const distributed = distributePaymentAmount(selectedCredits, totalAmount);
+        setSelectedCredits(distributed);
+      } else {
+        setSelectedCredits(selectedCredits.map(item => ({ ...item, amount: '' })));
+      }
+    }
   };
 
   const handleCreditAmountChange = (
     credit: Credit,
     rawValue: string
   ) => {
+    // If in auto mode, switch to manual mode when user edits individual amounts
+    if (distributionMode === 'auto') {
+      setDistributionMode('manual');
+      setTotalPaymentAmount("");
+    }
+
     const sanitized = rawValue.replace(/[^0-9.]/g, '');
     const parts = sanitized.split('.');
     if (parts.length > 2) {
@@ -208,14 +342,14 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   const selectedCreditMap = useMemo(() => {
     const map = new Map<
       string,
-      { index: number; amount: string; credit: Credit }
+      { index: number; amount: string; credit: Credit & { suggestedAmount?: string } }
     >();
 
     selectedCredits.forEach((item, index) => {
       map.set(item.credit.CreditPaymentID.toString(), {
         index,
         amount: item.amount,
-        credit: item.credit,
+        credit: { ...item.credit, suggestedAmount: item.suggestedAmount },
       });
     });
 
@@ -237,6 +371,16 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       return true;
     }
 
+    // In auto mode, check if total payment is valid
+    if (distributionMode === 'auto' && totalPaymentAmount) {
+      const totalAmount = parseFloat(totalPaymentAmount);
+      if (isNaN(totalAmount) || totalAmount <= 0) {
+        return true;
+      }
+      return false;
+    }
+
+    // In manual mode, check individual amounts
     return selectedCredits.some((item) => {
       const value = parseFloat(item.amount);
       if (!item.amount || isNaN(value) || value <= 0) {
@@ -244,14 +388,34 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       }
       return value - Number(item.credit.Amount) > 0.009;
     });
-  }, [selectedCredits]);
+  }, [selectedCredits, distributionMode, totalPaymentAmount]);
 
   const handleOpenConfirmDialog = () => {
-    if (selectedCredits.length === 0 || totalSelectedAmount <= 0 || hasInvalidSelection) {
+    if (selectedCredits.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "No Credits Selected",
+        description: "Please select at least one credit to settle.",
+        duration: 3000,
+      });
+      return;
+    }
+
+    if (distributionMode === 'auto' && (!totalPaymentAmount || parseFloat(totalPaymentAmount) <= 0)) {
+      toast({
+        variant: "destructive",
+        title: "Invalid Payment Amount",
+        description: "Please enter a valid total payment amount.",
+        duration: 3000,
+      });
+      return;
+    }
+
+    if (totalSelectedAmount <= 0 || hasInvalidSelection) {
       toast({
         variant: "destructive",
         title: "Invalid Amount",
-        description: "Please select at least one credit and enter a valid amount to settle.",
+        description: "Please enter valid amounts for the selected credits.",
         duration: 3000,
       });
       return;
@@ -547,7 +711,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                             </TableCell>
                             <TableCell className="text-right">
                               {isSelected ? (
-                                <div className="flex flex-col space-y-1 items-end">
+                                <div className="flex flex-col gap-1 items-end">
                                   <Input
                                     inputMode="decimal"
                                     value={amountValue}
@@ -559,10 +723,16 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                                     }
                                     className="text-right"
                                   />
-                                  {isAmountInvalid && (
-                                    <span className="text-xs text-red-500 text-right">
-                                      Enter amount up to Rs. {outstanding.toFixed(2)}
-                                    </span>
+                                  {selection && selection.credit.suggestedAmount && !amountValue && (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => acceptSuggestedAmount(credit)}
+                                      className="h-6 text-xs px-2"
+                                    >
+                                      Use Rs. {parseFloat(selection.credit.suggestedAmount || '0').toFixed(2)}
+                                    </Button>
                                   )}
                                 </div>
                               ) : (
@@ -579,8 +749,36 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                 </div>
                 
                 {/* Payment Entry */}
-                <div className="space-y-3 mt-4">
-                  <div className="flex items-center justify-between">
+                <div className="space-y-3 mt-4 border-t pt-4">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="total-payment">Total Payment Amount</Label>
+                      {suggestedTotalPayment && !totalPaymentAmount && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={acceptSuggestedTotalPayment}
+                          className="h-7 text-xs"
+                        >
+                          Use Suggested: Rs. {parseFloat(suggestedTotalPayment).toFixed(2)}
+                        </Button>
+                      )}
+                    </div>
+                    <Input
+                      id="total-payment"
+                      inputMode="decimal"
+                      value={totalPaymentAmount}
+                      onChange={(e) => handleTotalPaymentChange(e.target.value)}
+                      placeholder="Enter total payment amount"
+                      className="w-full"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Enter the total payment amount and it will be automatically distributed across selected bills in order.
+                    </p>
+                  </div>
+                  
+                  <div className="flex items-center justify-between pt-2">
                     <p className="text-sm font-medium text-gray-700">
                       Total Selected Amount
                     </p>
@@ -588,7 +786,17 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                       Rs. {totalSelectedAmount.toFixed(2)}
                     </p>
                   </div>
-                  {hasInvalidSelection && selectedCredits.length > 0 && (
+                  
+                  {totalPaymentAmount && parseFloat(totalPaymentAmount) > totalSelectedAmount && (
+                    <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
+                      <p className="text-xs text-yellow-800">
+                        Payment amount (Rs. {parseFloat(totalPaymentAmount).toFixed(2)}) exceeds total selected amount. 
+                        Remaining Rs. {(parseFloat(totalPaymentAmount) - totalSelectedAmount).toFixed(2)} will not be applied.
+                      </p>
+                    </div>
+                  )}
+                  
+                  {hasInvalidSelection && selectedCredits.length > 0 && distributionMode === 'manual' && (
                     <p className="text-xs text-red-500">
                       Please enter a valid amount (greater than zero and not exceeding the outstanding amount) for each selected credit.
                     </p>
@@ -654,13 +862,23 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
             <div className="mt-4 space-y-2">
               <p className="text-sm font-medium text-gray-700">Selected Credits</p>
               <ul className="list-disc pl-5 space-y-1 text-sm text-gray-600">
-                {selectedCredits.map((item, index) => (
-                  <li key={item.credit.CreditPaymentID}>
-                    <span className="font-medium">#{index + 1}</span> · Due{" "}
-                    {format(new Date(item.credit.DueDate), 'yyyy-MM-dd')} · Settling Rs.{" "}
-                    {parseFloat(item.amount || '0').toFixed(2)}
-                  </li>
-                ))}
+                {selectedCredits
+                  .filter(item => item.amount && parseFloat(item.amount) > 0)
+                  .map((item, index) => {
+                    const amount = parseFloat(item.amount || '0');
+                    const creditAmount = Number(item.credit.Amount);
+                    const isPartial = amount < creditAmount;
+                    return (
+                      <li key={item.credit.CreditPaymentID}>
+                        <span className="font-medium">#{index + 1}</span> · Invoice: {item.credit.InvoiceID || 'N/A'} · Due{" "}
+                        {format(new Date(item.credit.DueDate), 'yyyy-MM-dd')} · Settling Rs.{" "}
+                        {amount.toFixed(2)}
+                        {isPartial && (
+                          <span className="text-orange-600"> (Partial - Remaining: Rs. {(creditAmount - amount).toFixed(2)})</span>
+                        )}
+                      </li>
+                    );
+                  })}
               </ul>
             </div>
           )}
