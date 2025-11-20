@@ -21,6 +21,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+interface Vendor {
+  VendorID: number;
+  VendorName: string;
+}
+
 interface Product {
   ProductID: number;
   Name: string;
@@ -28,6 +33,8 @@ interface Product {
   VendorID?: string;
   CurrentQTY: number;
   BusinessLineName?: string;
+  Vendors?: Vendor[];
+  ProductIDs?: number[];
 }
 
 const ProductsInventory: React.FC = () => {
@@ -41,7 +48,7 @@ const ProductsInventory: React.FC = () => {
   
   // State for delete confirmation dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
-  const [productToDelete, setProductToDelete] = useState<number | null>(null);
+  const [productToDelete, setProductToDelete] = useState<number | number[] | null>(null);
   const [deleteDialogMessage, setDeleteDialogMessage] = useState<string>("");
   const [deleteDialogSeverity, setDeleteDialogSeverity] = useState<"warning" | "danger">("warning");
 
@@ -129,28 +136,48 @@ const ProductsInventory: React.FC = () => {
 
   const handleDeleteProduct = async (productId: number) => {
     try {
-      // First, check if product has related price list items
-      const checkResponse = await axiosInstance.get(
-        `${process.env.NEXT_PUBLIC_API_URL}/products/${productId}/can-delete`
-      );
+      // Find the product to get all ProductIDs if it's a grouped product
+      const product = products.find(p => p.ProductID === productId);
+      const productIdsToDelete = product?.ProductIDs && product.ProductIDs.length > 0 
+        ? product.ProductIDs 
+        : [productId];
       
-      const hasRelatedPriceList = checkResponse.data.hasRelatedRecords;
+      // Check if any of the products have related price list items
+      let hasRelatedPriceList = false;
+      for (const id of productIdsToDelete) {
+        try {
+          const checkResponse = await axiosInstance.get(
+            `${process.env.NEXT_PUBLIC_API_URL}/products/${id}/can-delete`
+          );
+          if (checkResponse.data.hasRelatedRecords) {
+            hasRelatedPriceList = true;
+            break;
+          }
+        } catch (error) {
+          console.error('Error checking product references:', error);
+          // Continue checking other products
+        }
+      }
+      
+      const vendorCount = product?.Vendors?.length || 1;
+      const itemName = product?.Name || 'this product';
       
       if (hasRelatedPriceList) {
         // Show confirmation with warning about price lists
         setDeleteDialogSeverity("danger");
         setDeleteDialogMessage(
-          `This product is used in one or more price lists. Deleting it will remove all related price list entries. Are you sure you want to proceed?`
+          `${itemName} is used in one or more price lists. Deleting it will remove all related price list entries${vendorCount > 1 ? ` and all ${vendorCount} vendor associations` : ''}. Are you sure you want to proceed?`
         );
       } else {
         // Standard confirmation
         setDeleteDialogSeverity("warning");
         setDeleteDialogMessage(
-          "Are you sure you want to delete this product? This action cannot be undone."
+          `Are you sure you want to delete ${itemName}?${vendorCount > 1 ? ` This will delete the product from all ${vendorCount} vendors.` : ''} This action cannot be undone.`
         );
       }
       
-      setProductToDelete(productId);
+      // Store all ProductIDs to delete
+      setProductToDelete(productIdsToDelete);
       setDeleteDialogOpen(true);
     } catch (error) {
       console.error('Error checking product references:', error);
@@ -162,19 +189,28 @@ const ProductsInventory: React.FC = () => {
     if (!productToDelete) return;
     
     try {
-      await axiosInstance.delete(
-        `${process.env.NEXT_PUBLIC_API_URL}/products/${productToDelete}`,
-        { 
-          data: { forceCascade: deleteDialogSeverity === "danger" } 
-        }
+      // Handle both single ProductID and array of ProductIDs
+      const productIdsToDelete = Array.isArray(productToDelete) ? productToDelete : [productToDelete];
+      
+      // Delete all products with the same name
+      const deletePromises = productIdsToDelete.map(productId =>
+        axiosInstance.delete(
+          `${process.env.NEXT_PUBLIC_API_URL}/products/${productId}`,
+          { 
+            data: { forceCascade: deleteDialogSeverity === "danger" } 
+          }
+        )
       );
+      
+      await Promise.all(deletePromises);
       
       // Refresh product list
       fetchProducts();
       
+      const deletedCount = productIdsToDelete.length;
       toast({
         title: "Success",
-        description: "Product deleted successfully",
+        description: `Product${deletedCount > 1 ? 's' : ''} deleted successfully`,
       });
       
       // Close dialog and reset state
@@ -246,6 +282,7 @@ const ProductsInventory: React.FC = () => {
           <TableRow>
             <TableHead>Product ID</TableHead>
             <TableHead>Name</TableHead>
+            <TableHead>Vendors</TableHead>
             <TableHead className="text-right">Current QTY</TableHead>
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
@@ -266,6 +303,22 @@ const ProductsInventory: React.FC = () => {
               <TableRow key={product.ProductID}>
                 <TableCell>{product.ProductID}</TableCell>
                 <TableCell>{product.Name}</TableCell>
+                <TableCell>
+                  {product.Vendors && product.Vendors.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {product.Vendors.map((vendor) => (
+                        <span
+                          key={vendor.VendorID}
+                          className="inline-flex items-center px-2 py-1 rounded-md bg-gray-100 text-gray-800 text-xs font-medium"
+                        >
+                          {vendor.VendorName}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-gray-400 text-sm">No vendors</span>
+                  )}
+                </TableCell>
                 <TableCell className="text-right">{product.CurrentQTY}</TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end space-x-2">
