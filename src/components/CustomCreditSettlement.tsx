@@ -666,13 +666,13 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                         const isSelected = Boolean(selection);
                         const amountValue = selection?.amount ?? '';
                         const outstanding = Number(credit.Amount);
-                        const amountNumeric = parseFloat(amountValue);
-                        const isAmountInvalid =
-                          isSelected &&
-                          (!amountValue ||
-                            isNaN(amountNumeric) ||
-                            amountNumeric <= 0 ||
-                            amountNumeric - outstanding > 0.009);
+                        // const amountNumeric = parseFloat(amountValue);
+                        // const isAmountInvalid =
+                        //   isSelected &&
+                        //   (!amountValue ||
+                        //     isNaN(amountNumeric) ||
+                        //     amountNumeric <= 0 ||
+                        //     amountNumeric - outstanding > 0.009);
 
                         return (
                           <TableRow
