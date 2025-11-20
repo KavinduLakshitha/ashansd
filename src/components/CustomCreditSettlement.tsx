@@ -30,6 +30,8 @@ interface Credit {
   CustomerID?: number;
   CreditLimit?: number;
   SaleID?: number;
+  SaleDate?: string;
+  InvoiceID?: string;
 }
 
 interface CustomerWithCredits {
@@ -361,7 +363,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="sm:max-w-[1000px]">
           <DialogHeader>
             <DialogTitle>Custom Credit Settlement</DialogTitle>
             <DialogDescription>
@@ -478,16 +480,18 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                 </div>
                 
                 {/* Pending Credits Table */}
-                <div className="max-h-[200px] overflow-y-auto">
+                <div className="max-h-[300px] overflow-x-auto overflow-y-auto">
                   <h3 className="text-md font-medium mb-2">Pending Credits</h3>
-                  <Table className="border">
+                  <Table className="border min-w-[900px]">
                     <TableHeader className="bg-gray-50">
                       <TableRow>
                         <TableHead className="w-12 text-center">Select</TableHead>
                         <TableHead className="w-16 text-center">Order</TableHead>
-                        <TableHead className="w-1/3">Due Date</TableHead>
-                        <TableHead className="text-right">Outstanding</TableHead>
-                        <TableHead className="text-right">Settle Amount</TableHead>
+                        <TableHead className="min-w-[150px]">Invoice ID</TableHead>
+                        <TableHead className="min-w-[100px]">Sale Date</TableHead>
+                        <TableHead className="min-w-[100px]">Due Date</TableHead>
+                        <TableHead className="text-right min-w-[120px]">Outstanding</TableHead>
+                        <TableHead className="text-right min-w-[150px]">Settle Amount</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -530,14 +534,20 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                               )}
                             </TableCell>
                             <TableCell>
+                              {credit.InvoiceID || '-'}
+                            </TableCell>
+                            <TableCell>
+                              {credit.SaleDate ? format(new Date(credit.SaleDate), 'yyyy-MM-dd') : '-'}
+                            </TableCell>
+                            <TableCell>
                               {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
                             </TableCell>
                             <TableCell className="text-right">
                               Rs. {outstanding.toFixed(2)}
                             </TableCell>
-                            <TableCell>
+                            <TableCell className="text-right">
                               {isSelected ? (
-                                <div className="flex flex-col space-y-1">
+                                <div className="flex flex-col space-y-1 items-end">
                                   <Input
                                     inputMode="decimal"
                                     value={amountValue}
@@ -547,9 +557,10 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                                     onBlur={(e) =>
                                       handleCreditAmountBlur(credit, e.target.value)
                                     }
+                                    className="text-right"
                                   />
                                   {isAmountInvalid && (
-                                    <span className="text-xs text-red-500">
+                                    <span className="text-xs text-red-500 text-right">
                                       Enter amount up to Rs. {outstanding.toFixed(2)}
                                     </span>
                                   )}
