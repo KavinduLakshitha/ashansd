@@ -881,7 +881,7 @@ const PaymentStatusHistory: React.FC = () => {
     }
   };
 
-  const getStatusBadge = (status: string): JSX.Element => {
+  const getStatusBadge = (status: string): React.ReactElement => {
     switch (status) {
       case 'REALIZED':
         return <Badge variant="outline" className="bg-green-100 text-green-800 border-green-300">Realized</Badge>;
@@ -896,7 +896,7 @@ const PaymentStatusHistory: React.FC = () => {
     }
   };
   
-  const getPaymentMethodBadge = (method: string): JSX.Element => {
+  const getPaymentMethodBadge = (method: string): React.ReactElement => {
     switch (method) {
       case 'CREDIT':
         return <Badge variant="outline" className="border-orange-500 text-orange-500">Credit</Badge>;
