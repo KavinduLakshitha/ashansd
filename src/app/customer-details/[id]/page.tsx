@@ -55,9 +55,17 @@ interface PendingCredit {
   Amount: number;
 }
 
+interface PendingOpeningBalance {
+  OpeningBalanceID: number;
+  Amount: number;
+  BalanceDate: string;
+  ReferenceID: string;
+}
+
 interface PendingPayments {
   pendingCheques: PendingCheque[];
   pendingCredits: PendingCredit[];
+  pendingOpeningBalances?: PendingOpeningBalance[];
 }
 
 // Utility functions
@@ -81,6 +89,9 @@ const formatCurrency = (amount: number | null | undefined) => {
 };
 
 const getPaymentDetails = (payment: Payment) => {
+  if (payment.PaymentMethod === 'OPENING_BALANCE') {
+    return 'Pre go-live outstanding balance';
+  }
   if (payment.PaymentMethod === 'CHEQUE' && payment.paymentDetails) {
     return `Cheque #${payment.paymentDetails.chequeNumber} - ${payment.paymentDetails.bank}`;
   }
@@ -100,7 +111,8 @@ export default function CustomerDetailsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [pendingPayments, setPendingPayments] = useState<PendingPayments>({ 
     pendingCheques: [], 
-    pendingCredits: [] 
+    pendingCredits: [],
+    pendingOpeningBalances: []
   });
   const [loading, setLoading] = useState(true);
 
@@ -126,7 +138,7 @@ export default function CustomerDetailsPage() {
           }),
           api.get(`${process.env.NEXT_PUBLIC_API_URL}/payments/pending/${customerData.BusinessLineID}?customerId=${id}`).catch(error => {
             console.error('Error fetching pending payments:', error);
-            return { data: { pendingCheques: [], pendingCredits: [] } };
+            return { data: { pendingCheques: [], pendingCredits: [], pendingOpeningBalances: [] } };
           })
         ]);
 
@@ -299,6 +311,30 @@ export default function CustomerDetailsPage() {
                   </TableBody>
                 </Table>
               </div>
+
+              {(pendingPayments.pendingOpeningBalances?.length ?? 0) > 0 && (
+                <div>
+                  <h3 className="text-lg font-medium mb-4">Opening Balances</h3>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Reference</TableHead>
+                        <TableHead>Balance Date</TableHead>
+                        <TableHead>Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {pendingPayments.pendingOpeningBalances!.map((ob, index) => (
+                        <TableRow key={index}>
+                          <TableCell>{ob.ReferenceID}</TableCell>
+                          <TableCell>{formatDate(ob.BalanceDate)}</TableCell>
+                          <TableCell>{formatCurrency(ob.Amount)}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
 
               <div>
                 <h3 className="text-lg font-medium mb-4">Pending Credits</h3>
