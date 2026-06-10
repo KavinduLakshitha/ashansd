@@ -40,7 +40,7 @@ export function DatePicker({ selectedDate, onDateChange, label }: DatePickerProp
             mode="single"
             selected={selectedDate}
             onSelect={(date) => date && onDateChange(date)}
-            initialFocus
+            autoFocus
           />
         </PopoverContent>
       </Popover>

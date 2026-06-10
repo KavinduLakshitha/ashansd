@@ -1004,7 +1004,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                     selected={asOfDate}
                     onSelect={handleDateSelect}
                     disabled={(date) => date > new Date()}
-                    initialFocus
+                    autoFocus
                   />
                 </PopoverContent>
               </Popover>
@@ -1235,7 +1235,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                             setStartDate(date || startDate);
                             setStartDateOpen(false);
                           }}
-                          initialFocus
+                          autoFocus
                         />
                       </PopoverContent>
                     </Popover>
@@ -1258,7 +1258,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                           selected={endDate}
                           onSelect={handleToDateSelect}
                           disabled={(date) => date > new Date()}
-                          initialFocus
+                          autoFocus
                         />
                       </PopoverContent>
                     </Popover>
