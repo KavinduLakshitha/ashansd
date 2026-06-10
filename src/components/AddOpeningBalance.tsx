@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import api from "@/lib/api/axios";
 import { useAuth } from "@/app/auth/auth-context";
-import SearchableCustomerSelect from "@/components/SearchableCustomerSelect";
+import DialogCustomerSelect from "@/components/DialogCustomerSelect";
 import { AxiosError } from "axios";
 
 interface AddOpeningBalanceDialogProps {
@@ -122,7 +122,7 @@ const AddOpeningBalanceDialog = ({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md overflow-visible">
         <DialogHeader>
           <DialogTitle>
             {isEditMode ? "Edit Opening Balance" : "Add Opening Balance"}
@@ -136,7 +136,7 @@ const AddOpeningBalanceDialog = ({
             {!isEditMode && (
               <div className="space-y-2">
                 <Label>Customer</Label>
-                <SearchableCustomerSelect
+                <DialogCustomerSelect
                   value={customerName}
                   onChange={(name, id) => {
                     setCustomerName(name);
