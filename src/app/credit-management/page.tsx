@@ -57,9 +57,21 @@ interface Credit {
   SaleID: number;
 }
 
+interface OpeningBalance {
+  OpeningBalanceID: number;
+  Amount: number;
+  BalanceDate: string;
+  Status: string;
+  CustomerName: string;
+  CustomerID: number;
+  CreditLimit: number;
+  ReferenceID: string;
+}
+
 interface PaymentState {
   pendingCheques: Cheque[];
   pendingCredits: Credit[];
+  pendingOpeningBalances: OpeningBalance[];
   realizedCheques: Cheque[];
   settledCredits: Credit[];
 }
@@ -71,7 +83,7 @@ interface Customer {
 
 interface ConfirmDialogState {
   isOpen: boolean;
-  type: 'realize' | 'bounce' | 'settle' | 'delete_cheque' | 'delete_credit' | null;
+  type: 'realize' | 'bounce' | 'settle' | 'settle_opening_balance' | 'delete_cheque' | 'delete_credit' | null;
   paymentId: string | number | null;
   title: string;
   description: string;
@@ -89,6 +101,7 @@ const PaymentManagement = () => {
   const [pendingPayments, setPendingPayments] = useState<PaymentState>({ 
     pendingCheques: [], 
     pendingCredits: [],
+    pendingOpeningBalances: [],
     realizedCheques: [],
     settledCredits: []
   });
@@ -202,7 +215,13 @@ const PaymentManagement = () => {
       }
   
       const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/payments/pending/${businessLineId}?${params.toString()}`);
-      setPendingPayments(response.data);
+      setPendingPayments({
+        pendingCheques: response.data.pendingCheques || [],
+        pendingCredits: response.data.pendingCredits || [],
+        pendingOpeningBalances: response.data.pendingOpeningBalances || [],
+        realizedCheques: response.data.realizedCheques || [],
+        settledCredits: response.data.settledCredits || [],
+      });
     } catch (err: unknown) {
       if (err instanceof AxiosError) {
         const errorMessage = err.response?.data?.message || 'Failed to fetch pending payments';
@@ -250,6 +269,16 @@ const PaymentManagement = () => {
       paymentId: cheque.ChequePaymentID,
       title: 'Bounce Cheque',
       description: `Are you sure you want to mark cheque #${cheque.ChequeNumber} as bounced? This will convert it to a credit with a due date 30 days from today.`
+    });
+  };
+
+  const confirmSettleOpeningBalance = (openingBalance: OpeningBalance) => {
+    setConfirmDialog({
+      isOpen: true,
+      type: 'settle_opening_balance',
+      paymentId: openingBalance.OpeningBalanceID,
+      title: 'Settle Opening Balance',
+      description: `Mark the pre go-live opening balance (${openingBalance.ReferenceID}) for ${openingBalance.CustomerName} as collected? Amount: Rs. ${Number(openingBalance.Amount).toFixed(2)}. This removes it from outstanding. You can undo from Opening Balances using the Undo button.`
     });
   };
 
@@ -318,6 +347,9 @@ const PaymentManagement = () => {
         break;
       case 'settle':
         await handleSettleCredit(paymentId);
+        break;
+      case 'settle_opening_balance':
+        await handleSettleOpeningBalance(paymentId);
         break;
       case 'delete_cheque':
         await handleDeleteChequeRealization(paymentId);
@@ -410,6 +442,38 @@ const PaymentManagement = () => {
       setProcessingIds(prev => {
         const newSet = new Set(prev);
         newSet.delete(chequePaymentId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleSettleOpeningBalance = async (openingBalanceId: string | number) => {
+    try {
+      setProcessingIds(prev => new Set(prev).add(openingBalanceId));
+      await axios.put(`${process.env.NEXT_PUBLIC_API_URL}/payments/opening-balance/${openingBalanceId}/settle`);
+      await fetchPendingPayments();
+      toast({
+        title: "Success",
+        description: "Opening balance settled. Undo from Opening Balances if this was a mistake.",
+        duration: 5000,
+      });
+    } catch (err: unknown) {
+      if (err instanceof AxiosError) {
+        const errorMessage = err.response?.data?.message || 'Error settling opening balance';
+        setError(`Error: ${errorMessage}`);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: errorMessage,
+          duration: 3000,
+        });
+      } else {
+        console.error('Unexpected error:', err);
+      }
+    } finally {
+      setProcessingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(openingBalanceId);
         return newSet;
       });
     }
@@ -725,7 +789,10 @@ const PaymentManagement = () => {
             </TabsTrigger>
             <TabsTrigger value="credit">
               Pending Credits ({pendingPayments.pendingCredits.length})
-            </TabsTrigger>            
+            </TabsTrigger>
+            <TabsTrigger value="opening-balances">
+              Opening Balances ({pendingPayments.pendingOpeningBalances.length})
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="cheques">
@@ -873,11 +940,77 @@ const PaymentManagement = () => {
               </Table>
             </CardContent>
           </TabsContent>
+
+          <TabsContent value="opening-balances">
+            <CardContent className="mt-6">
+              <Table className="border">
+                <TableHeader className="bg-gray-50">
+                  <TableRow>
+                    <TableHead className="text-black font-bold">Reference</TableHead>
+                    <TableHead className="text-black font-bold">Customer</TableHead>
+                    <TableHead className="text-black font-bold">Balance Date</TableHead>
+                    <TableHead className="text-black font-bold">Type</TableHead>
+                    <TableHead className="text-black font-bold text-right">Amount</TableHead>
+                    <TableHead className="text-black font-bold text-right">Credit Limit</TableHead>
+                    <TableHead className="text-black font-bold text-center">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pendingPayments.pendingOpeningBalances.map((openingBalance) => (
+                    <TableRow key={openingBalance.OpeningBalanceID}>
+                      <TableCell>{openingBalance.ReferenceID}</TableCell>
+                      <TableCell>{openingBalance.CustomerName}</TableCell>
+                      <TableCell>
+                        {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-xs font-medium px-2 py-1 rounded bg-amber-100 text-amber-800">
+                          OPENING_BALANCE
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        Rs. {Number(openingBalance.Amount).toFixed(2)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        Rs. {Number(openingBalance.CreditLimit).toFixed(2)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-center items-center">
+                          <Button
+                            variant="default"
+                            onClick={() => confirmSettleOpeningBalance(openingBalance)}
+                            disabled={processingIds.has(openingBalance.OpeningBalanceID)}
+                            size="sm"
+                          >
+                            {processingIds.has(openingBalance.OpeningBalanceID) ? 'Processing...' : 'Settle'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {pendingPayments.pendingOpeningBalances.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={7} className="text-center py-4">
+                        No pending opening balances found
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </TabsContent>
         </Tabs>
       </Card>
 
       {/* Confirmation Dialog */}
-      <Dialog open={confirmDialog.isOpen} onOpenChange={closeConfirmDialog}>
+      <Dialog
+        open={
+          confirmDialog.isOpen &&
+          confirmDialog.type !== 'delete_cheque' &&
+          confirmDialog.type !== 'delete_credit'
+        }
+        onOpenChange={closeConfirmDialog}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{confirmDialog.title}</DialogTitle>

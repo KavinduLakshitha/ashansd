@@ -12,7 +12,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Edit, Trash, Upload, Download, AlertTriangle, Loader2, CheckCircle } from "lucide-react";
+import { Edit, Trash, Upload, Download, AlertTriangle, Loader2, CheckCircle, Undo2 } from "lucide-react";
 import AddOpeningBalanceDialog from "@/components/AddOpeningBalance";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/auth/auth-context";
@@ -58,7 +58,12 @@ export default function OpeningBalancesPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<OpeningBalance | null>(null);
+  const [settleTarget, setSettleTarget] = useState<OpeningBalance | null>(null);
+  const [unsettleTarget, setUnsettleTarget] = useState<OpeningBalance | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSettling, setIsSettling] = useState(false);
+  const [isUnsettling, setIsUnsettling] = useState(false);
+  const [clearResults, setClearResults] = useState<Record<string, number> | null>(null);
   const [importResults, setImportResults] = useState<BulkImportResult | null>(null);
   const [showImportResults, setShowImportResults] = useState(false);
   const [replaceOnImport, setReplaceOnImport] = useState(false);
@@ -114,10 +119,16 @@ export default function OpeningBalancesPage() {
         .includes(searchTerm.toLowerCase())
   );
 
-  const handleSettle = async (balance: OpeningBalance) => {
+  const handleSettle = async () => {
+    if (!settleTarget) return;
+    setIsSettling(true);
     try {
-      await api.put(`/opening-balances/${balance.OpeningBalanceID}/settle`);
-      toast({ title: "Settled", description: `Opening balance for ${balance.CustomerName} marked as collected` });
+      await api.put(`/opening-balances/${settleTarget.OpeningBalanceID}/settle`);
+      toast({
+        title: "Settled",
+        description: `${settleTarget.CustomerName} opening balance marked as collected. Use Undo on the Opening Balances screen to reverse if needed.`,
+      });
+      setSettleTarget(null);
       fetchBalances();
     } catch (error) {
       const axiosError = error as AxiosError<{ message?: string }>;
@@ -126,6 +137,31 @@ export default function OpeningBalancesPage() {
         description: axiosError.response?.data?.message || "Failed to settle",
         variant: "destructive",
       });
+    } finally {
+      setIsSettling(false);
+    }
+  };
+
+  const handleUnsettle = async () => {
+    if (!unsettleTarget) return;
+    setIsUnsettling(true);
+    try {
+      await api.put(`/opening-balances/${unsettleTarget.OpeningBalanceID}/unsettle`);
+      toast({
+        title: "Settlement Undone",
+        description: `${unsettleTarget.CustomerName} opening balance is pending again.`,
+      });
+      setUnsettleTarget(null);
+      fetchBalances();
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message?: string }>;
+      toast({
+        title: "Error",
+        description: axiosError.response?.data?.message || "Failed to undo settlement",
+        variant: "destructive",
+      });
+    } finally {
+      setIsUnsettling(false);
     }
   };
 
@@ -157,9 +193,13 @@ export default function OpeningBalancesPage() {
         businessLineId: getBusinessLineID(),
         confirmPhrase: clearConfirmText,
       });
-      toast({
-        title: "Transactional Data Cleared",
-        description: response.data.message,
+      setClearResults({
+        deletedSales: response.data.deletedSales ?? 0,
+        deletedPurchases: response.data.deletedPurchases ?? 0,
+        deletedStockAdjustments: response.data.deletedStockAdjustments ?? 0,
+        deletedStockMovements: response.data.deletedStockMovements ?? 0,
+        deletedStockBatches: response.data.deletedStockBatches ?? 0,
+        zeroedProducts: response.data.zeroedProducts ?? 0,
       });
       setShowClearDialog(false);
       setClearConfirmText("");
@@ -292,7 +332,7 @@ export default function OpeningBalancesPage() {
               onClick={() => setShowClearDialog(true)}
             >
               <AlertTriangle className="w-4 h-4 mr-1" />
-              Clear Transactional Data
+              Clear Data & Zero Stock
             </Button>
           )}
           <Button
@@ -391,23 +431,35 @@ export default function OpeningBalancesPage() {
                         >
                           <Edit className="w-4 h-4" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          disabled={balance.Status === "SETTLED"}
-                          title="Mark as collected"
-                          onClick={() => handleSettle(balance)}
-                        >
-                          <CheckCircle className="w-4 h-4 text-green-600" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          disabled={balance.Status === "SETTLED"}
-                          onClick={() => setDeleteTarget(balance)}
-                        >
-                          <Trash className="w-4 h-4 text-red-500" />
-                        </Button>
+                        {balance.Status === "PENDING" ? (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Mark as collected"
+                              onClick={() => setSettleTarget(balance)}
+                            >
+                              <CheckCircle className="w-4 h-4 text-green-600" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Delete opening balance"
+                              onClick={() => setDeleteTarget(balance)}
+                            >
+                              <Trash className="w-4 h-4 text-red-500" />
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Undo settlement"
+                            onClick={() => setUnsettleTarget(balance)}
+                          >
+                            <Undo2 className="w-4 h-4 text-blue-600" />
+                          </Button>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -431,8 +483,9 @@ export default function OpeningBalancesPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Opening Balance</AlertDialogTitle>
             <AlertDialogDescription>
-              Remove the opening balance of {formatCurrency(deleteTarget?.Amount || 0)} for{" "}
-              {deleteTarget?.CustomerName}? This cannot be undone.
+              Delete the opening balance of {formatCurrency(deleteTarget?.Amount || 0)} for{" "}
+              <strong>{deleteTarget?.CustomerName}</strong>? This removes it from outstanding
+              totals. The record cannot be recovered — you would need to add it again manually.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -444,17 +497,67 @@ export default function OpeningBalancesPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+      <AlertDialog open={!!settleTarget} onOpenChange={() => setSettleTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Clear Transactional Data</AlertDialogTitle>
+            <AlertDialogTitle>Mark Opening Balance as Collected</AlertDialogTitle>
+            <AlertDialogDescription>
+              Mark the opening balance of {formatCurrency(settleTarget?.Amount || 0)} for{" "}
+              <strong>{settleTarget?.CustomerName}</strong> as settled? This records that the
+              amount was collected and removes it from outstanding totals. You can undo this
+              later using the Undo button.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSettling}>Cancel</AlertDialogCancel>
+            <Button onClick={handleSettle} disabled={isSettling}>
+              {isSettling ? "Settling..." : "Mark as Collected"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!unsettleTarget} onOpenChange={() => setUnsettleTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Undo Settlement</AlertDialogTitle>
+            <AlertDialogDescription>
+              Undo settlement for {formatCurrency(unsettleTarget?.Amount || 0)} owed by{" "}
+              <strong>{unsettleTarget?.CustomerName}</strong>? The opening balance will return
+              to <strong>PENDING</strong> and count toward outstanding again.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isUnsettling}>Cancel</AlertDialogCancel>
+            <Button onClick={handleUnsettle} disabled={isUnsettling}>
+              {isUnsettling ? "Undoing..." : "Undo Settlement"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Clear Data & Zero Stock</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3">
-                <p>
-                  This will permanently delete all sales invoices, payments, collections,
-                  and related customer account transactions for the current business line.
-                  Customer master data (names, contacts, credit limits, price lists) will
-                  be retained. Product stock quantities from sales will be restored.
+                <p className="font-medium text-red-700">
+                  This action cannot be undone. The following will be permanently removed
+                  for the current business line:
+                </p>
+                <ul className="list-disc list-inside text-sm space-y-1 text-gray-700">
+                  <li>All sales invoices, payments, and collections</li>
+                  <li>All purchase records and purchase payments</li>
+                  <li>All stock adjustments and stock movement history</li>
+                  <li>All stock batch records</li>
+                </ul>
+                <p className="text-sm font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded-md p-3">
+                  All product stock quantities will be set to <strong>0</strong>. Use Stock
+                  Adjustment afterward to enter opening stock levels.
+                </p>
+                <p className="text-sm text-gray-600">
+                  Kept: customers, vendors, products, price lists, and opening balances already entered.
                 </p>
                 <p className="font-medium text-red-600">
                   Type <code>CLEAR TRANSACTIONAL DATA</code> to confirm:
@@ -474,8 +577,34 @@ export default function OpeningBalancesPage() {
               onClick={handleClearTransactionalData}
               disabled={isClearing || clearConfirmText !== "CLEAR TRANSACTIONAL DATA"}
             >
-              {isClearing ? "Clearing..." : "Clear Data"}
+              {isClearing ? "Clearing..." : "Clear Data & Zero Stock"}
             </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!clearResults} onOpenChange={() => setClearResults(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Go-Live Reset Complete</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3 text-sm">
+                <p>Transactional data cleared and stock levels zeroed.</p>
+                <ul className="space-y-1">
+                  <li>Sales deleted: <strong>{clearResults?.deletedSales}</strong></li>
+                  <li>Purchases deleted: <strong>{clearResults?.deletedPurchases}</strong></li>
+                  <li>Stock adjustments deleted: <strong>{clearResults?.deletedStockAdjustments}</strong></li>
+                  <li>Stock movements deleted: <strong>{clearResults?.deletedStockMovements}</strong></li>
+                  <li>Stock batches deleted: <strong>{clearResults?.deletedStockBatches}</strong></li>
+                  <li className="text-amber-800 font-medium">
+                    Products zeroed: <strong>{clearResults?.zeroedProducts}</strong>
+                  </li>
+                </ul>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button onClick={() => setClearResults(null)}>Close</Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
