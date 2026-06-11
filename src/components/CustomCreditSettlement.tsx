@@ -848,7 +848,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <Label htmlFor="total-payment">Total Payment Amount</Label>
-                      {suggestedTotalPayment && !totalPaymentAmount && (
+                      {distributionMode === 'auto' && suggestedTotalPayment && !totalPaymentAmount && (
                         <Button
                           type="button"
                           variant="outline"
@@ -867,9 +867,12 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                       onChange={(e) => handleTotalPaymentChange(e.target.value)}
                       placeholder="Enter total payment amount"
                       className="w-full"
+                      disabled={distributionMode === 'manual'}
                     />
                     <p className="text-xs text-gray-500">
-                      Enter the total payment amount and it will be automatically distributed across selected bills in order.
+                      {distributionMode === 'manual'
+                        ? 'Total payment amount is disabled while settle amounts are entered per row. Use Total Selected Amount below.'
+                        : 'Enter the total payment amount and it will be automatically distributed across selected bills in order.'}
                     </p>
                   </div>
                   
