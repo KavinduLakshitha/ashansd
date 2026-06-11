@@ -1181,7 +1181,7 @@ const PaymentManagement = () => {
                 )}
                 {confirmDialog.type === 'delete_opening_balance' ? (
                   <p className="mt-2 text-sm font-medium text-red-600">
-                    The record cannot be recovered — you would need to add it again manually.
+                    The record cannot be recovered - you would need to add it again manually.
                   </p>
                 ) : (
                   <>

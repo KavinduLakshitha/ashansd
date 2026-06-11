@@ -415,7 +415,7 @@ export default function OpeningBalancesPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="max-w-[200px] truncate">
-                      {balance.Notes || "—"}
+                      {balance.Notes || "-"}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
@@ -485,7 +485,7 @@ export default function OpeningBalancesPage() {
             <AlertDialogDescription>
               Delete the opening balance of {formatCurrency(deleteTarget?.Amount || 0)} for{" "}
               <strong>{deleteTarget?.CustomerName}</strong>? This removes it from outstanding
-              totals. The record cannot be recovered — you would need to add it again manually.
+              totals. The record cannot be recovered - you would need to add it again manually.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -641,7 +641,7 @@ export default function OpeningBalancesPage() {
                         <ul className="space-y-1 max-h-40 overflow-y-auto">
                           {importResults.success.map((s, i) => (
                             <li key={i} className="text-green-700">
-                              Row {s.row}: {s.customerName} — {s.action}
+                              Row {s.row}: {s.customerName} - {s.action}
                             </li>
                           ))}
                         </ul>
