@@ -61,6 +61,20 @@ const formatCurrency = (amount: number) =>
     maximumFractionDigits: 2,
   })}`;
 
+type SelectedSettlementItem =
+  | { type: 'credit'; credit: Credit; amount: string; suggestedAmount?: string }
+  | { type: 'opening_balance'; openingBalance: OpeningBalance; amount: string; suggestedAmount?: string };
+
+const getSettlementItemKey = (item: SelectedSettlementItem) =>
+  item.type === 'credit'
+    ? `credit-${item.credit.CreditPaymentID}`
+    : `ob-${item.openingBalance.OpeningBalanceID}`;
+
+const getSettlementOutstanding = (item: SelectedSettlementItem) =>
+  item.type === 'credit'
+    ? Number(item.credit.Amount)
+    : Number(item.openingBalance.Amount);
+
 interface CustomCreditSettlementDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -86,9 +100,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     bank: '',
     realizeDate: ''
   });
-  const [selectedCredits, setSelectedCredits] = useState<
-    Array<{ credit: Credit; amount: string; suggestedAmount?: string }>
-  >([]);
+  const [selectedItems, setSelectedItems] = useState<SelectedSettlementItem[]>([]);
   const [totalPaymentAmount, setTotalPaymentAmount] = useState<string>("");
   const [suggestedTotalPayment, setSuggestedTotalPayment] = useState<string>("");
   const [distributionMode, setDistributionMode] = useState<'manual' | 'auto'>('auto');
@@ -106,7 +118,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           bank: '',
           realizeDate: ''
       });
-      setSelectedCredits([]);
+      setSelectedItems([]);
       setTotalPaymentAmount("");
       setSuggestedTotalPayment("");
       setDistributionMode('auto');
@@ -118,7 +130,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     const fetchCustomerCredits = async () => {
       if (!selectedCustomerId || !open) {
         setCustomerCredits(null);
-        setSelectedCredits([]);
+        setSelectedItems([]);
         return;
       }
       
@@ -160,103 +172,102 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     fetchCustomerCredits();
   }, [selectedCustomerId, getBusinessLineID, open]);
 
-  const toggleCreditSelection = (credit: Credit) => {
-    setSelectedCredits((prev) => {
-      const existingIndex = prev.findIndex(
-        (item) => item.credit.CreditPaymentID === credit.CreditPaymentID
-      );
+  const toggleItemSelection = (item: Credit | OpeningBalance, itemType: 'credit' | 'opening_balance') => {
+    const itemKey =
+      itemType === 'credit'
+        ? `credit-${(item as Credit).CreditPaymentID}`
+        : `ob-${(item as OpeningBalance).OpeningBalanceID}`;
+
+    setSelectedItems((prev) => {
+      const existingIndex = prev.findIndex((selected) => getSettlementItemKey(selected) === itemKey);
 
       if (existingIndex > -1) {
-        // Unselecting - remove from list and update suggested total
-        const removedCredit = prev[existingIndex];
-        const newCredits = prev.filter(
-          (item) => item.credit.CreditPaymentID !== credit.CreditPaymentID
-        );
-        
-        // Update suggested total payment
-        const removedAmount = parseFloat(removedCredit.suggestedAmount || removedCredit.amount || '0');
+        const removedItem = prev[existingIndex];
+        const nextItems = prev.filter((selected) => getSettlementItemKey(selected) !== itemKey);
+
+        const removedAmount = parseFloat(removedItem.suggestedAmount || removedItem.amount || '0');
         if (!isNaN(removedAmount)) {
           const currentSuggested = parseFloat(suggestedTotalPayment || '0');
           const newSuggested = Math.max(0, currentSuggested - removedAmount);
           setSuggestedTotalPayment(newSuggested > 0 ? newSuggested.toFixed(2) : '');
         }
-        
-        // Re-distribute if in auto mode and total payment is set
+
         if (distributionMode === 'auto' && totalPaymentAmount) {
           const totalAmount = parseFloat(totalPaymentAmount);
           if (!isNaN(totalAmount) && totalAmount > 0) {
-            return distributePaymentAmount(newCredits, totalAmount);
+            return distributePaymentAmount(nextItems, totalAmount);
           }
         }
-        return newCredits;
+        return nextItems;
       }
 
-      // Selecting - add to list with suggested amount
-      const suggestedAmount = Number(credit.Amount).toFixed(2);
-      const newCredits = [
-        ...prev,
-        {
-          credit,
-          amount: '', // Start with empty amount
-          suggestedAmount: suggestedAmount, // Suggest full outstanding amount
-        },
-      ];
-      
-      // Update suggested total payment
-      const creditAmount = parseFloat(suggestedAmount);
-      if (!isNaN(creditAmount)) {
+      const outstanding =
+        itemType === 'credit'
+          ? Number((item as Credit).Amount)
+          : Number((item as OpeningBalance).Amount);
+      const suggestedAmount = outstanding.toFixed(2);
+      const newItem: SelectedSettlementItem =
+        itemType === 'credit'
+          ? {
+              type: 'credit',
+              credit: item as Credit,
+              amount: '',
+              suggestedAmount,
+            }
+          : {
+              type: 'opening_balance',
+              openingBalance: item as OpeningBalance,
+              amount: '',
+              suggestedAmount,
+            };
+      const nextItems = [...prev, newItem];
+
+      const itemAmount = parseFloat(suggestedAmount);
+      if (!isNaN(itemAmount)) {
         const currentSuggested = parseFloat(suggestedTotalPayment || '0');
-        const newSuggested = currentSuggested + creditAmount;
-        setSuggestedTotalPayment(newSuggested.toFixed(2));
+        setSuggestedTotalPayment((currentSuggested + itemAmount).toFixed(2));
       }
-      
-      // Re-distribute if in auto mode and total payment is set
+
       if (distributionMode === 'auto' && totalPaymentAmount) {
         const totalAmount = parseFloat(totalPaymentAmount);
         if (!isNaN(totalAmount) && totalAmount > 0) {
-          return distributePaymentAmount(newCredits, totalAmount);
+          return distributePaymentAmount(nextItems, totalAmount);
         }
       }
-      return newCredits;
+      return nextItems;
     });
   };
 
-  // Function to automatically distribute payment across selected credits
   const distributePaymentAmount = (
-    credits: Array<{ credit: Credit; amount: string; suggestedAmount?: string }>,
+    items: SelectedSettlementItem[],
     totalAmount: number
-  ): Array<{ credit: Credit; amount: string; suggestedAmount?: string }> => {
-    if (isNaN(totalAmount) || totalAmount <= 0 || credits.length === 0) {
-      return credits.map(item => ({ ...item, amount: '' }));
+  ): SelectedSettlementItem[] => {
+    if (isNaN(totalAmount) || totalAmount <= 0 || items.length === 0) {
+      return items.map((item) => ({ ...item, amount: '' }));
     }
 
     let remainingAmount = totalAmount;
-    const distributed = credits.map((item) => {
-      const creditAmount = Number(item.credit.Amount);
+    return items.map((item) => {
+      const outstanding = getSettlementOutstanding(item);
       if (remainingAmount <= 0) {
         return { ...item, amount: '', suggestedAmount: item.suggestedAmount };
       }
-      
-      if (remainingAmount >= creditAmount) {
-        // Fully settle this credit
-        remainingAmount -= creditAmount;
-        return { ...item, amount: creditAmount.toFixed(2), suggestedAmount: item.suggestedAmount };
-      } else {
-        // Partially settle this credit
-        const partialAmount = remainingAmount;
-        remainingAmount = 0;
-        return { ...item, amount: partialAmount.toFixed(2), suggestedAmount: item.suggestedAmount };
-      }
-    });
 
-    return distributed;
+      if (remainingAmount >= outstanding) {
+        remainingAmount -= outstanding;
+        return { ...item, amount: outstanding.toFixed(2), suggestedAmount: item.suggestedAmount };
+      }
+
+      const partialAmount = remainingAmount;
+      remainingAmount = 0;
+      return { ...item, amount: partialAmount.toFixed(2), suggestedAmount: item.suggestedAmount };
+    });
   };
 
-  // Handle accepting suggested amount for a credit
-  const acceptSuggestedAmount = (credit: Credit) => {
-    setSelectedCredits((prev) =>
+  const acceptSuggestedAmount = (itemKey: string) => {
+    setSelectedItems((prev) =>
       prev.map((item) =>
-        item.credit.CreditPaymentID === credit.CreditPaymentID
+        getSettlementItemKey(item) === itemKey
           ? { ...item, amount: item.suggestedAmount || '' }
           : item
       )
@@ -264,20 +275,17 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     setDistributionMode('manual');
   };
 
-  // Handle accepting suggested total payment
   const acceptSuggestedTotalPayment = () => {
     setTotalPaymentAmount(suggestedTotalPayment);
     setDistributionMode('auto');
-    if (selectedCredits.length > 0) {
+    if (selectedItems.length > 0) {
       const totalAmount = parseFloat(suggestedTotalPayment);
       if (!isNaN(totalAmount) && totalAmount > 0) {
-        const distributed = distributePaymentAmount(selectedCredits, totalAmount);
-        setSelectedCredits(distributed);
+        setSelectedItems(distributePaymentAmount(selectedItems, totalAmount));
       }
     }
   };
 
-  // Handle total payment amount change
   const handleTotalPaymentChange = (value: string) => {
     const sanitized = value.replace(/[^0-9.]/g, '');
     const parts = sanitized.split('.');
@@ -292,23 +300,17 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     setTotalPaymentAmount(normalized);
     setDistributionMode('auto');
 
-    // Automatically distribute when user enters amount
-    if (selectedCredits.length > 0) {
+    if (selectedItems.length > 0) {
       const totalAmount = parseFloat(normalized);
       if (!isNaN(totalAmount) && totalAmount > 0) {
-        const distributed = distributePaymentAmount(selectedCredits, totalAmount);
-        setSelectedCredits(distributed);
+        setSelectedItems(distributePaymentAmount(selectedItems, totalAmount));
       } else {
-        setSelectedCredits(selectedCredits.map(item => ({ ...item, amount: '' })));
+        setSelectedItems(selectedItems.map((item) => ({ ...item, amount: '' })));
       }
     }
   };
 
-  const handleCreditAmountChange = (
-    credit: Credit,
-    rawValue: string
-  ) => {
-    // If in auto mode, switch to manual mode when user edits individual amounts
+  const handleItemAmountChange = (itemKey: string, rawValue: string) => {
     if (distributionMode === 'auto') {
       setDistributionMode('manual');
       setTotalPaymentAmount("");
@@ -324,73 +326,67 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
         ? `${parts[0]}.${parts[1].slice(0, 2)}`
         : sanitized;
 
-    setSelectedCredits((prev) =>
+    setSelectedItems((prev) =>
       prev.map((item) =>
-        item.credit.CreditPaymentID === credit.CreditPaymentID
-          ? { ...item, amount: normalized }
-          : item
+        getSettlementItemKey(item) === itemKey ? { ...item, amount: normalized } : item
       )
     );
   };
 
-  const handleCreditAmountBlur = (credit: Credit, value: string) => {
+  const handleItemAmountBlur = (itemKey: string, value: string, maxAmount: number) => {
     const numeric = parseFloat(value);
-    const maxAmount = Number(credit.Amount);
 
     if (!value || isNaN(numeric) || numeric <= 0) {
-      setSelectedCredits((prev) =>
+      setSelectedItems((prev) =>
         prev.map((item) =>
-          item.credit.CreditPaymentID === credit.CreditPaymentID
-            ? { ...item, amount: '' }
-            : item
+          getSettlementItemKey(item) === itemKey ? { ...item, amount: '' } : item
         )
       );
       return;
     }
 
     const clamped = Math.min(numeric, maxAmount);
-    setSelectedCredits((prev) =>
+    setSelectedItems((prev) =>
       prev.map((item) =>
-        item.credit.CreditPaymentID === credit.CreditPaymentID
+        getSettlementItemKey(item) === itemKey
           ? { ...item, amount: clamped.toFixed(2) }
           : item
       )
     );
   };
 
-  const selectedCreditMap = useMemo(() => {
+  const selectedItemMap = useMemo(() => {
     const map = new Map<
       string,
-      { index: number; amount: string; credit: Credit & { suggestedAmount?: string } }
+      { index: number; amount: string; suggestedAmount?: string }
     >();
 
-    selectedCredits.forEach((item, index) => {
-      map.set(item.credit.CreditPaymentID.toString(), {
+    selectedItems.forEach((item, index) => {
+      map.set(getSettlementItemKey(item), {
         index,
         amount: item.amount,
-        credit: { ...item.credit, suggestedAmount: item.suggestedAmount },
+        suggestedAmount: item.suggestedAmount,
       });
     });
 
     return map;
-  }, [selectedCredits]);
+  }, [selectedItems]);
 
   const totalSelectedAmount = useMemo(() => {
-    return selectedCredits.reduce((sum, item) => {
+    return selectedItems.reduce((sum, item) => {
       const value = parseFloat(item.amount);
       if (isNaN(value)) {
         return sum;
       }
       return sum + value;
     }, 0);
-  }, [selectedCredits]);
+  }, [selectedItems]);
 
   const hasInvalidSelection = useMemo(() => {
-    if (selectedCredits.length === 0) {
+    if (selectedItems.length === 0) {
       return true;
     }
 
-    // In auto mode, check if total payment is valid
     if (distributionMode === 'auto' && totalPaymentAmount) {
       const totalAmount = parseFloat(totalPaymentAmount);
       if (isNaN(totalAmount) || totalAmount <= 0) {
@@ -399,22 +395,21 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       return false;
     }
 
-    // In manual mode, check individual amounts
-    return selectedCredits.some((item) => {
+    return selectedItems.some((item) => {
       const value = parseFloat(item.amount);
       if (!item.amount || isNaN(value) || value <= 0) {
         return true;
       }
-      return value - Number(item.credit.Amount) > 0.009;
+      return value - getSettlementOutstanding(item) > 0.009;
     });
-  }, [selectedCredits, distributionMode, totalPaymentAmount]);
+  }, [selectedItems, distributionMode, totalPaymentAmount]);
 
   const handleOpenConfirmDialog = () => {
-    if (selectedCredits.length === 0) {
+    if (selectedItems.length === 0) {
       toast({
         variant: "destructive",
-        title: "No Credits Selected",
-        description: "Please select at least one credit to settle.",
+        title: "No Items Selected",
+        description: "Please select at least one credit or opening balance to settle.",
         duration: 3000,
       });
       return;
@@ -434,7 +429,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       toast({
         variant: "destructive",
         title: "Invalid Amount",
-        description: "Please enter valid amounts for the selected credits.",
+        description: "Please enter valid amounts for the selected items.",
         duration: 3000,
       });
       return;
@@ -463,7 +458,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   const handleSettleAmount = async () => {
     if (
       !selectedCustomerId ||
-      selectedCredits.length === 0 ||
+      selectedItems.length === 0 ||
       totalSelectedAmount <= 0 ||
       hasInvalidSelection
     ) {
@@ -476,10 +471,19 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     const requestData = {
       amount: parseFloat(totalSelectedAmount.toFixed(2)),
       paymentMethod,
-      selectedCredits: selectedCredits.map((item) => ({
-        creditPaymentId: item.credit.CreditPaymentID,
-        amount: parseFloat(item.amount),
-      })),
+      selectedItems: selectedItems.map((item) =>
+        item.type === 'credit'
+          ? {
+              type: 'credit',
+              creditPaymentId: item.credit.CreditPaymentID,
+              amount: parseFloat(item.amount),
+            }
+          : {
+              type: 'opening_balance',
+              openingBalanceId: item.openingBalance.OpeningBalanceID,
+              amount: parseFloat(item.amount),
+            }
+      ),
       ...(paymentMethod === 'CHEQUE' && { chequeDetails })
     };
     
@@ -496,13 +500,13 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       // Show success message
       toast({
         title: "Success",
-        description: "Payment successfully applied to credits",
+        description: "Payment successfully applied",
         duration: 3000,
       });
       
       // Notify parent component to refresh its data
       onSuccess();
-      setSelectedCredits([]);
+      setSelectedItems([]);
       
     } catch (err) {
       console.error('Error settling credits:', err);
@@ -533,14 +537,53 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     setSelectedCustomerName(value);
     if (customerId) {
       setSelectedCustomerId(customerId.toString());
-      setSelectedCredits([]);
+      setSelectedItems([]);
     }
   };
 
   const handleSelectCustomer = (customer: Customer) => {
     setSelectedCustomerId(customer.CustomerID.toString());
     setSelectedCustomerName(customer.CusName);
-    setSelectedCredits([]);
+    setSelectedItems([]);
+  };
+
+  const renderSettleAmountCell = (
+    itemKey: string,
+    isSelected: boolean,
+    amountValue: string,
+    suggestedAmount?: string,
+    maxAmount?: number
+  ) => {
+    if (!isSelected) {
+      return (
+        <span className="text-xs text-muted-foreground">
+          Not selected
+        </span>
+      );
+    }
+
+    return (
+      <div className="flex flex-col gap-1 items-end">
+        <Input
+          inputMode="decimal"
+          value={amountValue}
+          onChange={(e) => handleItemAmountChange(itemKey, e.target.value)}
+          onBlur={(e) => handleItemAmountBlur(itemKey, e.target.value, maxAmount || 0)}
+          className="text-right"
+        />
+        {suggestedAmount && !amountValue && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => acceptSuggestedAmount(itemKey)}
+            className="h-6 text-xs px-2"
+          >
+            Use {formatCurrency(parseFloat(suggestedAmount))}
+          </Button>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -550,7 +593,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           <DialogHeader>
             <DialogTitle>Custom Credit Settlement</DialogTitle>
             <DialogDescription>
-              Apply a custom payment amount to a customer&apos;s pending credits.
+              Apply a custom payment amount to a customer&apos;s pending credits and opening balances.
             </DialogDescription>
           </DialogHeader>
 
@@ -693,19 +736,11 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                     </TableHeader>
                     <TableBody>
                       {customerCredits.pendingCredits.map((credit) => {
-                        const selection = selectedCreditMap.get(
-                          credit.CreditPaymentID?.toString() ?? ''
-                        );
+                        const itemKey = `credit-${credit.CreditPaymentID}`;
+                        const selection = selectedItemMap.get(itemKey);
                         const isSelected = Boolean(selection);
                         const amountValue = selection?.amount ?? '';
                         const outstanding = Number(credit.Amount);
-                        // const amountNumeric = parseFloat(amountValue);
-                        // const isAmountInvalid =
-                        //   isSelected &&
-                        //   (!amountValue ||
-                        //     isNaN(amountNumeric) ||
-                        //     amountNumeric <= 0 ||
-                        //     amountNumeric - outstanding > 0.009);
 
                         return (
                           <TableRow
@@ -716,7 +751,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                               <Checkbox
                                 aria-label="Select credit"
                                 checked={isSelected}
-                                onCheckedChange={() => toggleCreditSelection(credit)}
+                                onCheckedChange={() => toggleItemSelection(credit, 'credit')}
                               />
                             </TableCell>
                             <TableCell className="text-center">
@@ -743,78 +778,72 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                               {formatCurrency(outstanding)}
                             </TableCell>
                             <TableCell className="text-right">
-                              {isSelected ? (
-                                <div className="flex flex-col gap-1 items-end">
-                                  <Input
-                                    inputMode="decimal"
-                                    value={amountValue}
-                                    onChange={(e) =>
-                                      handleCreditAmountChange(credit, e.target.value)
-                                    }
-                                    onBlur={(e) =>
-                                      handleCreditAmountBlur(credit, e.target.value)
-                                    }
-                                    className="text-right"
-                                  />
-                                  {selection && selection.credit.suggestedAmount && !amountValue && (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => acceptSuggestedAmount(credit)}
-                                      className="h-6 text-xs px-2"
-                                    >
-                                      Use {formatCurrency(parseFloat(selection.credit.suggestedAmount || '0'))}
-                                    </Button>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  Not selected
-                                </span>
+                              {renderSettleAmountCell(
+                                itemKey,
+                                isSelected,
+                                amountValue,
+                                selection?.suggestedAmount,
+                                outstanding
                               )}
                             </TableCell>
                           </TableRow>
                         );
                       })}
-                      {customerCredits.pendingOpeningBalances.map((openingBalance) => (
-                        <TableRow
-                          key={`ob-${openingBalance.OpeningBalanceID}`}
-                          className="bg-amber-50/40"
-                        >
-                          <TableCell className="text-center">
-                            <span className="text-xs text-muted-foreground">—</span>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <span className="text-xs text-muted-foreground">—</span>
-                          </TableCell>
-                          <TableCell>{openingBalance.ReferenceID}</TableCell>
-                          <TableCell>—</TableCell>
-                          <TableCell>
-                            {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
-                          </TableCell>
-                          <TableCell className="text-right tabular-nums">
-                            {formatCurrency(openingBalance.Amount)}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">
-                              Opening Balance
-                            </Badge>
-                          </TableCell>
-                        </TableRow>
-                      ))}
+                      {customerCredits.pendingOpeningBalances.map((openingBalance) => {
+                        const itemKey = `ob-${openingBalance.OpeningBalanceID}`;
+                        const selection = selectedItemMap.get(itemKey);
+                        const isSelected = Boolean(selection);
+                        const amountValue = selection?.amount ?? '';
+                        const outstanding = Number(openingBalance.Amount);
+
+                        return (
+                          <TableRow
+                            key={itemKey}
+                            className={isSelected ? "bg-amber-50/50" : "bg-amber-50/20"}
+                          >
+                            <TableCell className="text-center">
+                              <Checkbox
+                                aria-label="Select opening balance"
+                                checked={isSelected}
+                                onCheckedChange={() => toggleItemSelection(openingBalance, 'opening_balance')}
+                              />
+                            </TableCell>
+                            <TableCell className="text-center">
+                              {isSelected ? (
+                                <Badge variant="secondary">
+                                  {(selection?.index ?? 0) + 1}
+                                </Badge>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  -
+                                </span>
+                              )}
+                            </TableCell>
+                            <TableCell>{openingBalance.ReferenceID}</TableCell>
+                            <TableCell>—</TableCell>
+                            <TableCell>
+                              {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
+                            </TableCell>
+                            <TableCell className="text-right tabular-nums">
+                              {formatCurrency(outstanding)}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {renderSettleAmountCell(
+                                itemKey,
+                                isSelected,
+                                amountValue,
+                                selection?.suggestedAmount,
+                                outstanding
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
 
-                {customerCredits.pendingOpeningBalances.length > 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    Opening balances are shown for reference. Settle them separately from the Pending Credits list.
-                  </p>
-                )}
-                
                 {/* Payment Entry */}
-                {customerCredits.pendingCredits.length > 0 && (
                 <div className="space-y-3 mt-4 border-t pt-4">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -862,16 +891,15 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                     </div>
                   )}
                   
-                  {hasInvalidSelection && selectedCredits.length > 0 && distributionMode === 'manual' && (
+                  {hasInvalidSelection && selectedItems.length > 0 && distributionMode === 'manual' && (
                     <p className="text-xs text-red-500">
-                      Please enter a valid amount (greater than zero and not exceeding the outstanding amount) for each selected credit.
+                      Please enter a valid amount (greater than zero and not exceeding the outstanding amount) for each selected item.
                     </p>
                   )}
                   <p className="text-sm text-gray-500 italic">
-                    Credits will be settled in the order selected. Partial settlements create a new pending credit for the remaining balance.
+                    Items will be settled in the order selected. Partial credit settlements create a new pending credit for the remaining balance.
                   </p>
                 </div>
-                )}
               </>
             ) : selectedCustomerId ? (
               <div className="py-2 text-center text-sm">
@@ -897,8 +925,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
               disabled={
                 !selectedCustomerId ||
                 !customerCredits ||
-                customerCredits.pendingCredits.length === 0 ||
-                selectedCredits.length === 0 ||
+                selectedItems.length === 0 ||
                 hasInvalidSelection ||
                 totalSelectedAmount <= 0 ||
                 (paymentMethod === 'CHEQUE' &&
@@ -922,26 +949,40 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
             <DialogDescription>
               You are about to settle {formatCurrency(totalSelectedAmount)} 
               {customerCredits && ` for ${customerCredits.customerDetails.CusName}`}.
-              Credits will be settled in the exact order they were selected.
+              Items will be settled in the exact order they were selected.
             </DialogDescription>
           </DialogHeader>
-          {selectedCredits.length > 0 && (
+          {selectedItems.length > 0 && (
             <div className="mt-4 space-y-2">
-              <p className="text-sm font-medium text-gray-700">Selected Credits</p>
+              <p className="text-sm font-medium text-gray-700">Selected Items</p>
               <ul className="list-disc pl-5 space-y-1 text-sm text-gray-600">
-                {selectedCredits
+                {selectedItems
                   .filter(item => item.amount && parseFloat(item.amount) > 0)
                   .map((item, index) => {
                     const amount = parseFloat(item.amount || '0');
-                    const creditAmount = Number(item.credit.Amount);
-                    const isPartial = amount < creditAmount;
+                    const outstanding = getSettlementOutstanding(item);
+                    const isPartial = amount < outstanding;
+
+                    if (item.type === 'credit') {
+                      return (
+                        <li key={getSettlementItemKey(item)}>
+                          <span className="font-medium">#{index + 1}</span> · Invoice: {item.credit.InvoiceID || 'N/A'} · Due{" "}
+                          {format(new Date(item.credit.DueDate), 'yyyy-MM-dd')} · Settling{" "}
+                          {formatCurrency(amount)}
+                          {isPartial && (
+                            <span className="text-orange-600"> (Partial - Remaining: {formatCurrency(outstanding - amount)})</span>
+                          )}
+                        </li>
+                      );
+                    }
+
                     return (
-                      <li key={item.credit.CreditPaymentID}>
-                        <span className="font-medium">#{index + 1}</span> · Invoice: {item.credit.InvoiceID || 'N/A'} · Due{" "}
-                        {format(new Date(item.credit.DueDate), 'yyyy-MM-dd')} · Settling{" "}
+                      <li key={getSettlementItemKey(item)}>
+                        <span className="font-medium">#{index + 1}</span> · Opening Balance: {item.openingBalance.ReferenceID} · Date{" "}
+                        {format(new Date(item.openingBalance.BalanceDate), 'yyyy-MM-dd')} · Settling{" "}
                         {formatCurrency(amount)}
                         {isPartial && (
-                          <span className="text-orange-600"> (Partial - Remaining: {formatCurrency(creditAmount - amount)})</span>
+                          <span className="text-orange-600"> (Partial - Remaining: {formatCurrency(outstanding - amount)})</span>
                         )}
                       </li>
                     );
