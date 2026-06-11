@@ -788,10 +788,7 @@ const PaymentManagement = () => {
               Pending Cheques ({pendingPayments.pendingCheques.length})
             </TabsTrigger>
             <TabsTrigger value="credit">
-              Pending Credits ({pendingPayments.pendingCredits.length})
-            </TabsTrigger>
-            <TabsTrigger value="opening-balances">
-              Opening Balances ({pendingPayments.pendingOpeningBalances.length})
+              Pending Credits ({pendingPayments.pendingCredits.length + pendingPayments.pendingOpeningBalances.length})
             </TabsTrigger>
           </TabsList>
 
@@ -881,6 +878,7 @@ const PaymentManagement = () => {
                   <TableRow>
                     <TableHead className="text-black font-bold">Customer</TableHead>
                     <TableHead className="text-black font-bold">Due Date</TableHead>
+                    <TableHead className="text-black font-bold">Type</TableHead>
                     <TableHead className="text-black font-bold text-right">Amount</TableHead>
                     <TableHead className="text-black font-bold text-right">Credit Limit</TableHead>
                     <TableHead className="text-black font-bold text-center">Actions</TableHead>
@@ -888,11 +886,12 @@ const PaymentManagement = () => {
                 </TableHeader>
                 <TableBody>
                   {pendingPayments.pendingCredits.map((credit) => (
-                    <TableRow key={credit.CreditPaymentID}>
+                    <TableRow key={`credit-${credit.CreditPaymentID}`}>
                       <TableCell>{credit.CustomerName}</TableCell>
                       <TableCell>
                         {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
                       </TableCell>
+                      <TableCell />
                       <TableCell className="text-right">
                         Rs. {Number(credit.Amount).toFixed(2)}
                       </TableCell>
@@ -929,43 +928,15 @@ const PaymentManagement = () => {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {pendingPayments.pendingCredits.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-4">
-                        No pending credits found
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </TabsContent>
-
-          <TabsContent value="opening-balances">
-            <CardContent className="mt-6">
-              <Table className="border">
-                <TableHeader className="bg-gray-50">
-                  <TableRow>
-                    <TableHead className="text-black font-bold">Reference</TableHead>
-                    <TableHead className="text-black font-bold">Customer</TableHead>
-                    <TableHead className="text-black font-bold">Balance Date</TableHead>
-                    <TableHead className="text-black font-bold">Type</TableHead>
-                    <TableHead className="text-black font-bold text-right">Amount</TableHead>
-                    <TableHead className="text-black font-bold text-right">Credit Limit</TableHead>
-                    <TableHead className="text-black font-bold text-center">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
                   {pendingPayments.pendingOpeningBalances.map((openingBalance) => (
-                    <TableRow key={openingBalance.OpeningBalanceID}>
-                      <TableCell>{openingBalance.ReferenceID}</TableCell>
+                    <TableRow key={`ob-${openingBalance.OpeningBalanceID}`}>
                       <TableCell>{openingBalance.CustomerName}</TableCell>
                       <TableCell>
                         {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
                       </TableCell>
                       <TableCell>
                         <span className="text-xs font-medium px-2 py-1 rounded bg-amber-100 text-amber-800">
-                          OPENING_BALANCE
+                          Opening Balance
                         </span>
                       </TableCell>
                       <TableCell className="text-right">
@@ -988,10 +959,10 @@ const PaymentManagement = () => {
                       </TableCell>
                     </TableRow>
                   ))}
-                  {pendingPayments.pendingOpeningBalances.length === 0 && (
+                  {pendingPayments.pendingCredits.length === 0 && pendingPayments.pendingOpeningBalances.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-4">
-                        No pending opening balances found
+                      <TableCell colSpan={6} className="text-center py-4">
+                        No pending credits found
                       </TableCell>
                     </TableRow>
                   )}
