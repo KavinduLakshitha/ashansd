@@ -949,7 +949,6 @@ const PaymentManagement = () => {
                   <TableRow>
                     <TableHead className="text-black font-bold">Customer</TableHead>
                     <TableHead className="text-black font-bold">Due Date</TableHead>
-                    <TableHead className="text-black font-bold">Type</TableHead>
                     <TableHead className="text-black font-bold text-right">Amount</TableHead>
                     <TableHead className="text-black font-bold text-right">Credit Limit</TableHead>
                     <TableHead className="text-black font-bold text-center">Actions</TableHead>
@@ -958,22 +957,13 @@ const PaymentManagement = () => {
                 <TableBody>
                   {pendingCreditRows.map((row) => {
                     if (row.kind === 'credit') {
-                      const { credit, displayAmount, includedOpeningBalance } = row;
+                      const { credit, displayAmount } = row;
 
                       return (
                         <TableRow key={`credit-${credit.CreditPaymentID}`}>
                           <TableCell>{credit.CustomerName}</TableCell>
                           <TableCell>
                             {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
-                          </TableCell>
-                          <TableCell>
-                            {includedOpeningBalance ? (
-                              <span className="text-xs font-medium px-2 py-1 rounded bg-amber-100 text-amber-800">
-                                Includes Opening Balance
-                              </span>
-                            ) : (
-                              <span className="text-muted-foreground">—</span>
-                            )}
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             {formatCurrency(displayAmount)}
@@ -1021,11 +1011,6 @@ const PaymentManagement = () => {
                         <TableCell>
                           {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
                         </TableCell>
-                        <TableCell>
-                          <span className="text-xs font-medium px-2 py-1 rounded bg-amber-100 text-amber-800">
-                            Opening Balance
-                          </span>
-                        </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {formatCurrency(displayAmount)}
                         </TableCell>
@@ -1052,7 +1037,7 @@ const PaymentManagement = () => {
                   })}
                   {pendingCreditRows.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={6} className="text-center py-4">
+                      <TableCell colSpan={5} className="text-center py-4">
                         No pending credits found
                       </TableCell>
                     </TableRow>
