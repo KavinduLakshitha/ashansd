@@ -83,7 +83,7 @@ interface Customer {
 
 interface ConfirmDialogState {
   isOpen: boolean;
-  type: 'realize' | 'bounce' | 'settle' | 'settle_opening_balance' | 'delete_cheque' | 'delete_credit' | null;
+  type: 'realize' | 'bounce' | 'settle' | 'settle_opening_balance' | 'delete_cheque' | 'delete_credit' | 'delete_opening_balance' | null;
   paymentId: string | number | null;
   title: string;
   description: string;
@@ -381,6 +381,20 @@ const PaymentManagement = () => {
     });
   };
 
+  const confirmDeleteOpeningBalance = (openingBalance: OpeningBalance) => {
+    setConfirmDialog({
+      isOpen: true,
+      type: 'delete_opening_balance',
+      paymentId: openingBalance.OpeningBalanceID,
+      title: 'Delete Opening Balance',
+      description: `Delete the opening balance (${openingBalance.ReferenceID}) of ${formatCurrency(openingBalance.Amount)} for ${openingBalance.CustomerName}? This removes it from outstanding totals.`,
+      paymentDetails: {
+        customerName: openingBalance.CustomerName,
+        amount: openingBalance.Amount,
+      },
+    });
+  };
+
   // Open confirmation dialog for Delete Credit Settlement
   const confirmDeleteCreditSettlement = (credit: Credit) => {
     setConfirmDialog({
@@ -427,6 +441,9 @@ const PaymentManagement = () => {
         break;
       case 'delete_credit':
         await handleDeleteCreditSettlement(paymentId);
+        break;
+      case 'delete_opening_balance':
+        await handleDeleteOpeningBalance(paymentId);
         break;
     }
   };
@@ -531,6 +548,38 @@ const PaymentManagement = () => {
     } catch (err: unknown) {
       if (err instanceof AxiosError) {
         const errorMessage = err.response?.data?.message || 'Error settling opening balance';
+        setError(`Error: ${errorMessage}`);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: errorMessage,
+          duration: 3000,
+        });
+      } else {
+        console.error('Unexpected error:', err);
+      }
+    } finally {
+      setProcessingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(openingBalanceId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleDeleteOpeningBalance = async (openingBalanceId: string | number) => {
+    try {
+      setProcessingIds(prev => new Set(prev).add(openingBalanceId));
+      await axios.delete(`${process.env.NEXT_PUBLIC_API_URL}/opening-balances/${openingBalanceId}`);
+      await fetchPendingPayments();
+      toast({
+        title: "Success",
+        description: "Opening balance removed",
+        duration: 3000,
+      });
+    } catch (err: unknown) {
+      if (err instanceof AxiosError) {
+        const errorMessage = err.response?.data?.message || 'Error deleting opening balance';
         setError(`Error: ${errorMessage}`);
         toast({
           variant: "destructive",
@@ -1028,7 +1077,20 @@ const PaymentManagement = () => {
                               {processingIds.has(openingBalance.OpeningBalanceID) ? 'Processing...' : 'Settle'}
                             </Button>
                             {user?.userType !== 'management' && (
-                              <span className="h-8 w-8 shrink-0" aria-hidden="true" />
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => confirmDeleteOpeningBalance(openingBalance)}
+                                disabled={processingIds.has(openingBalance.OpeningBalanceID)}
+                                className="hover:bg-red-50 hover:text-red-600"
+                                title="Delete Opening Balance"
+                              >
+                                {processingIds.has(openingBalance.OpeningBalanceID) ? (
+                                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                ) : (
+                                  <Trash2 className="h-4 w-4" />
+                                )}
+                              </Button>
                             )}
                           </div>
                         </TableCell>
@@ -1054,7 +1116,8 @@ const PaymentManagement = () => {
         open={
           confirmDialog.isOpen &&
           confirmDialog.type !== 'delete_cheque' &&
-          confirmDialog.type !== 'delete_credit'
+          confirmDialog.type !== 'delete_credit' &&
+          confirmDialog.type !== 'delete_opening_balance'
         }
         onOpenChange={closeConfirmDialog}
       >
@@ -1083,7 +1146,15 @@ const PaymentManagement = () => {
       </Dialog>
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={confirmDialog.isOpen && (confirmDialog.type === 'delete_cheque' || confirmDialog.type === 'delete_credit')} onOpenChange={closeConfirmDialog}>
+      <AlertDialog
+        open={
+          confirmDialog.isOpen &&
+          (confirmDialog.type === 'delete_cheque' ||
+            confirmDialog.type === 'delete_credit' ||
+            confirmDialog.type === 'delete_opening_balance')
+        }
+        onOpenChange={closeConfirmDialog}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
@@ -1096,7 +1167,7 @@ const PaymentManagement = () => {
                 {confirmDialog.paymentDetails && (
                   <div className="mt-2 p-3 bg-gray-50 rounded">
                     <p><strong>Customer:</strong> {confirmDialog.paymentDetails.customerName}</p>
-                    <p><strong>Amount:</strong> Rs. {Number(confirmDialog.paymentDetails.amount || 0).toFixed(2)}</p>
+                    <p><strong>Amount:</strong> {formatCurrency(confirmDialog.paymentDetails.amount || 0)}</p>
                     {confirmDialog.paymentDetails.chequeNumber && (
                       <>
                         <p><strong>Cheque #:</strong> {confirmDialog.paymentDetails.chequeNumber}</p>
@@ -1108,18 +1179,26 @@ const PaymentManagement = () => {
                     )}
                   </div>
                 )}
-                <p className="mt-2 text-sm text-orange-600">
-                  <strong>Warning:</strong> This action will:
-                </p>
-                <ul className="mt-1 text-sm text-orange-600 list-disc list-inside">
-                  <li>Permanently delete the payment and associated sale</li>
-                  <li>Restore product quantities to inventory</li>
-                  <li>Remove all related payment records</li>
-                  <li>Delete the entire invoice from the system</li>
-                </ul>
-                <p className="mt-2 text-sm font-medium text-red-600">
-                  This action cannot be undone.
-                </p>
+                {confirmDialog.type === 'delete_opening_balance' ? (
+                  <p className="mt-2 text-sm font-medium text-red-600">
+                    The record cannot be recovered — you would need to add it again manually.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-2 text-sm text-orange-600">
+                      <strong>Warning:</strong> This action will:
+                    </p>
+                    <ul className="mt-1 text-sm text-orange-600 list-disc list-inside">
+                      <li>Permanently delete the payment and associated sale</li>
+                      <li>Restore product quantities to inventory</li>
+                      <li>Remove all related payment records</li>
+                      <li>Delete the entire invoice from the system</li>
+                    </ul>
+                    <p className="mt-2 text-sm font-medium text-red-600">
+                      This action cannot be undone.
+                    </p>
+                  </>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1130,7 +1209,11 @@ const PaymentManagement = () => {
               className="bg-red-600 hover:bg-red-700"
               disabled={processingIds.has(confirmDialog.paymentId || '')}
             >
-              {processingIds.has(confirmDialog.paymentId || '') ? 'Deleting...' : `Delete Payment & Sale`}
+              {processingIds.has(confirmDialog.paymentId || '')
+                ? 'Deleting...'
+                : confirmDialog.type === 'delete_opening_balance'
+                  ? 'Delete Opening Balance'
+                  : 'Delete Payment & Sale'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
