@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Table, TableHeader, TableHead, TableBody, TableCell, TableRow } from "@/components/ui/table";
@@ -96,6 +96,68 @@ interface ConfirmDialogState {
   };
 }
 
+type PendingCreditRow =
+  | {
+      kind: 'credit';
+      credit: Credit;
+      displayAmount: number;
+      includedOpeningBalance?: OpeningBalance;
+    }
+  | {
+      kind: 'opening_balance';
+      openingBalance: OpeningBalance;
+      displayAmount: number;
+    };
+
+const formatCurrency = (amount: number) =>
+  `Rs. ${Number(amount).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const buildPendingCreditRows = (
+  credits: Credit[],
+  openingBalances: OpeningBalance[]
+): PendingCreditRow[] => {
+  const openingBalanceByCustomer = new Map(
+    openingBalances.map((openingBalance) => [openingBalance.CustomerID, openingBalance])
+  );
+  const customersWithCredits = new Set(credits.map((credit) => credit.CustomerID));
+  const mergedOpeningBalanceCustomers = new Set<number>();
+  const rows: PendingCreditRow[] = [];
+
+  for (const credit of credits) {
+    const openingBalance = openingBalanceByCustomer.get(credit.CustomerID);
+    let includedOpeningBalance: OpeningBalance | undefined;
+    let displayAmount = Number(credit.Amount);
+
+    if (openingBalance && !mergedOpeningBalanceCustomers.has(credit.CustomerID)) {
+      includedOpeningBalance = openingBalance;
+      displayAmount += Number(openingBalance.Amount);
+      mergedOpeningBalanceCustomers.add(credit.CustomerID);
+    }
+
+    rows.push({
+      kind: 'credit',
+      credit,
+      displayAmount,
+      includedOpeningBalance,
+    });
+  }
+
+  for (const openingBalance of openingBalances) {
+    if (!customersWithCredits.has(openingBalance.CustomerID)) {
+      rows.push({
+        kind: 'opening_balance',
+        openingBalance,
+        displayAmount: Number(openingBalance.Amount),
+      });
+    }
+  }
+
+  return rows;
+};
+
 const PaymentManagement = () => {
   const { user, getBusinessLineID } = useAuth();
   const [pendingPayments, setPendingPayments] = useState<PaymentState>({ 
@@ -129,6 +191,15 @@ const PaymentManagement = () => {
   
   const [activeDateFilter, setActiveDateFilter] = useState<'due' | 'sale'>('sale');
   const [customSettlementOpen, setCustomSettlementOpen] = useState(false);
+
+  const pendingCreditRows = useMemo(
+    () =>
+      buildPendingCreditRows(
+        pendingPayments.pendingCredits,
+        pendingPayments.pendingOpeningBalances
+      ),
+    [pendingPayments.pendingCredits, pendingPayments.pendingOpeningBalances]
+  );
 
   // State for confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
@@ -788,7 +859,7 @@ const PaymentManagement = () => {
               Pending Cheques ({pendingPayments.pendingCheques.length})
             </TabsTrigger>
             <TabsTrigger value="credit">
-              Pending Credits ({pendingPayments.pendingCredits.length + pendingPayments.pendingOpeningBalances.length})
+              Pending Credits ({pendingCreditRows.length})
             </TabsTrigger>
           </TabsList>
 
@@ -815,11 +886,11 @@ const PaymentManagement = () => {
                         {format(new Date(cheque.RealizeDate), 'yyyy-MM-dd')}
                       </TableCell>
                       <TableCell>{cheque.Bank}</TableCell>
-                      <TableCell className="text-right">
-                        Rs. {Number(cheque.Amount).toFixed(2)}
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(cheque.Amount)}
                       </TableCell>
-                      <TableCell className="text-right">
-                        Rs. {Number(cheque.CreditLimit).toFixed(2)}
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(cheque.CreditLimit)}
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-center items-center gap-2">
@@ -885,84 +956,101 @@ const PaymentManagement = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {pendingPayments.pendingCredits.map((credit) => (
-                    <TableRow key={`credit-${credit.CreditPaymentID}`}>
-                      <TableCell>{credit.CustomerName}</TableCell>
-                      <TableCell>
-                        {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">—</TableCell>
-                      <TableCell className="text-right">
-                        Rs. {Number(credit.Amount).toFixed(2)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        Rs. {Number(credit.CreditLimit).toFixed(2)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-center items-center gap-2">
-                          <Button 
-                            variant="default"
-                            onClick={() => confirmSettleCredit(credit)}
-                            disabled={processingIds.has(credit.CreditPaymentID)}
-                            size="sm"
-                          >
-                            {processingIds.has(credit.CreditPaymentID) ? 'Processing...' : 'Settle'}
-                          </Button>
-                          {user?.userType !== 'management' && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => confirmDeleteCreditSettlement(credit)}
-                              disabled={processingIds.has(credit.CreditPaymentID)}
-                              className="hover:bg-red-50 hover:text-red-600"
-                              title="Delete Payment & Sale"
-                            >
-                              {processingIds.has(credit.CreditPaymentID) ? (
-                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </Button>
+                  {pendingCreditRows.map((row) => {
+                    if (row.kind === 'credit') {
+                      const { credit, displayAmount, includedOpeningBalance } = row;
+
+                      return (
+                        <TableRow key={`credit-${credit.CreditPaymentID}`}>
+                          <TableCell>{credit.CustomerName}</TableCell>
+                          <TableCell>
+                            {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
+                          </TableCell>
+                          <TableCell>
+                            {includedOpeningBalance ? (
+                              <span className="text-xs font-medium px-2 py-1 rounded bg-amber-100 text-amber-800">
+                                Includes Opening Balance
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
                             )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {pendingPayments.pendingOpeningBalances.map((openingBalance) => (
-                    <TableRow key={`ob-${openingBalance.OpeningBalanceID}`}>
-                      <TableCell>{openingBalance.CustomerName}</TableCell>
-                      <TableCell>
-                        {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
-                      </TableCell>
-                      <TableCell>
-                        <span className="text-xs font-medium px-2 py-1 rounded bg-amber-100 text-amber-800">
-                          Opening Balance
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        Rs. {Number(openingBalance.Amount).toFixed(2)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        Rs. {Number(openingBalance.CreditLimit).toFixed(2)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-center items-center gap-2">
-                          <Button
-                            variant="default"
-                            onClick={() => confirmSettleOpeningBalance(openingBalance)}
-                            disabled={processingIds.has(openingBalance.OpeningBalanceID)}
-                            size="sm"
-                          >
-                            {processingIds.has(openingBalance.OpeningBalanceID) ? 'Processing...' : 'Settle'}
-                          </Button>
-                          {user?.userType !== 'management' && (
-                            <span className="h-8 w-8 shrink-0" aria-hidden="true" />
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {pendingPayments.pendingCredits.length === 0 && pendingPayments.pendingOpeningBalances.length === 0 && (
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatCurrency(displayAmount)}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatCurrency(credit.CreditLimit)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex justify-center items-center gap-2">
+                              <Button
+                                variant="default"
+                                onClick={() => confirmSettleCredit(credit)}
+                                disabled={processingIds.has(credit.CreditPaymentID)}
+                                size="sm"
+                              >
+                                {processingIds.has(credit.CreditPaymentID) ? 'Processing...' : 'Settle'}
+                              </Button>
+                              {user?.userType !== 'management' && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => confirmDeleteCreditSettlement(credit)}
+                                  disabled={processingIds.has(credit.CreditPaymentID)}
+                                  className="hover:bg-red-50 hover:text-red-600"
+                                  title="Delete Payment & Sale"
+                                >
+                                  {processingIds.has(credit.CreditPaymentID) ? (
+                                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                                  ) : (
+                                    <Trash2 className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    }
+
+                    const { openingBalance, displayAmount } = row;
+
+                    return (
+                      <TableRow key={`ob-${openingBalance.OpeningBalanceID}`}>
+                        <TableCell>{openingBalance.CustomerName}</TableCell>
+                        <TableCell>
+                          {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-xs font-medium px-2 py-1 rounded bg-amber-100 text-amber-800">
+                            Opening Balance
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(displayAmount)}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {formatCurrency(openingBalance.CreditLimit)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-center items-center gap-2">
+                            <Button
+                              variant="default"
+                              onClick={() => confirmSettleOpeningBalance(openingBalance)}
+                              disabled={processingIds.has(openingBalance.OpeningBalanceID)}
+                              size="sm"
+                            >
+                              {processingIds.has(openingBalance.OpeningBalanceID) ? 'Processing...' : 'Settle'}
+                            </Button>
+                            {user?.userType !== 'management' && (
+                              <span className="h-8 w-8 shrink-0" aria-hidden="true" />
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {pendingCreditRows.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={6} className="text-center py-4">
                         No pending credits found
