@@ -891,7 +891,7 @@ const PaymentManagement = () => {
                       <TableCell>
                         {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
                       </TableCell>
-                      <TableCell />
+                      <TableCell className="text-muted-foreground">—</TableCell>
                       <TableCell className="text-right">
                         Rs. {Number(credit.Amount).toFixed(2)}
                       </TableCell>
@@ -946,7 +946,7 @@ const PaymentManagement = () => {
                         Rs. {Number(openingBalance.CreditLimit).toFixed(2)}
                       </TableCell>
                       <TableCell>
-                        <div className="flex justify-center items-center">
+                        <div className="flex justify-center items-center gap-2">
                           <Button
                             variant="default"
                             onClick={() => confirmSettleOpeningBalance(openingBalance)}
@@ -955,6 +955,9 @@ const PaymentManagement = () => {
                           >
                             {processingIds.has(openingBalance.OpeningBalanceID) ? 'Processing...' : 'Settle'}
                           </Button>
+                          {user?.userType !== 'management' && (
+                            <span className="h-8 w-8 shrink-0" aria-hidden="true" />
+                          )}
                         </div>
                       </TableCell>
                     </TableRow>
