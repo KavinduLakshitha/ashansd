@@ -34,6 +34,15 @@ interface Credit {
   InvoiceID?: string;
 }
 
+interface OpeningBalance {
+  OpeningBalanceID: number;
+  Amount: number;
+  BalanceDate: string;
+  CustomerName: string;
+  CustomerID: number;
+  ReferenceID: string;
+}
+
 interface CustomerWithCredits {
   customerDetails: {
     CustomerID: number;
@@ -41,8 +50,16 @@ interface CustomerWithCredits {
     CreditLimit: number;
   };
   pendingCredits: Credit[];
+  pendingOpeningBalances: OpeningBalance[];
   totalOutstanding: number;
+  openingBalanceOutstanding: number;
 }
+
+const formatCurrency = (amount: number) =>
+  `Rs. ${Number(amount).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 interface CustomCreditSettlementDialogProps {
   open: boolean;
@@ -127,8 +144,10 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
         
         setCustomerCredits({
           customerDetails: customerResponse.data,
-          pendingCredits: pendingResponse.data.pendingCredits,
-          totalOutstanding: outstandingResponse.data.TotalOutstanding
+          pendingCredits: pendingResponse.data.pendingCredits || [],
+          pendingOpeningBalances: pendingResponse.data.pendingOpeningBalances || [],
+          totalOutstanding: outstandingResponse.data.TotalOutstanding,
+          openingBalanceOutstanding: outstandingResponse.data.OpeningBalanceOutstanding || 0,
         });
       } catch (err) {
         console.error('Error fetching customer credits:', err);
@@ -625,21 +644,35 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
               <div className="flex justify-center py-4">
                 <p>Loading customer data...</p>
               </div>
-            ) : customerCredits && customerCredits.pendingCredits.length > 0 ? (
+            ) : customerCredits &&
+              (customerCredits.pendingCredits.length > 0 ||
+                customerCredits.pendingOpeningBalances.length > 0) ? (
               <>
                 {/* Customer Summary */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-gray-50 p-4 rounded-md">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 bg-gray-50 p-4 rounded-md">
                   <div>
                     <p className="text-sm text-gray-500">Customer</p>
                     <p className="font-medium">{customerCredits.customerDetails.CusName}</p>
                   </div>
                   <div>
                     <p className="text-sm text-gray-500">Credit Limit</p>
-                    <p className="font-medium">Rs. {Number(customerCredits.customerDetails.CreditLimit).toFixed(2)}</p>
+                    <p className="font-medium tabular-nums">
+                      {formatCurrency(customerCredits.customerDetails.CreditLimit)}
+                    </p>
                   </div>
+                  {customerCredits.openingBalanceOutstanding > 0 && (
+                    <div>
+                      <p className="text-sm text-gray-500">Opening Balance</p>
+                      <p className="font-medium tabular-nums">
+                        {formatCurrency(customerCredits.openingBalanceOutstanding)}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <p className="text-sm text-gray-500">Total Outstanding</p>
-                    <p className="font-medium">Rs. {Number(customerCredits.totalOutstanding).toFixed(2)}</p>
+                    <p className="font-medium tabular-nums">
+                      {formatCurrency(customerCredits.totalOutstanding)}
+                    </p>
                   </div>
                 </div>
                 
@@ -706,8 +739,8 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                             <TableCell>
                               {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
                             </TableCell>
-                            <TableCell className="text-right">
-                              Rs. {outstanding.toFixed(2)}
+                            <TableCell className="text-right tabular-nums">
+                              {formatCurrency(outstanding)}
                             </TableCell>
                             <TableCell className="text-right">
                               {isSelected ? (
@@ -731,7 +764,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                                       onClick={() => acceptSuggestedAmount(credit)}
                                       className="h-6 text-xs px-2"
                                     >
-                                      Use Rs. {parseFloat(selection.credit.suggestedAmount || '0').toFixed(2)}
+                                      Use {formatCurrency(parseFloat(selection.credit.suggestedAmount || '0'))}
                                     </Button>
                                   )}
                                 </div>
@@ -744,11 +777,44 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                           </TableRow>
                         );
                       })}
+                      {customerCredits.pendingOpeningBalances.map((openingBalance) => (
+                        <TableRow
+                          key={`ob-${openingBalance.OpeningBalanceID}`}
+                          className="bg-amber-50/40"
+                        >
+                          <TableCell className="text-center">
+                            <span className="text-xs text-muted-foreground">—</span>
+                          </TableCell>
+                          <TableCell className="text-center">
+                            <span className="text-xs text-muted-foreground">—</span>
+                          </TableCell>
+                          <TableCell>{openingBalance.ReferenceID}</TableCell>
+                          <TableCell>—</TableCell>
+                          <TableCell>
+                            {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            {formatCurrency(openingBalance.Amount)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">
+                              Opening Balance
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      ))}
                     </TableBody>
                   </Table>
                 </div>
+
+                {customerCredits.pendingOpeningBalances.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Opening balances are shown for reference. Settle them separately from the Pending Credits list.
+                  </p>
+                )}
                 
                 {/* Payment Entry */}
+                {customerCredits.pendingCredits.length > 0 && (
                 <div className="space-y-3 mt-4 border-t pt-4">
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
@@ -761,7 +827,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                           onClick={acceptSuggestedTotalPayment}
                           className="h-7 text-xs"
                         >
-                          Use Suggested: Rs. {parseFloat(suggestedTotalPayment).toFixed(2)}
+                          Use Suggested: {formatCurrency(parseFloat(suggestedTotalPayment))}
                         </Button>
                       )}
                     </div>
@@ -782,16 +848,16 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                     <p className="text-sm font-medium text-gray-700">
                       Total Selected Amount
                     </p>
-                    <p className="text-lg font-semibold text-gray-900">
-                      Rs. {totalSelectedAmount.toFixed(2)}
+                    <p className="text-lg font-semibold text-gray-900 tabular-nums">
+                      {formatCurrency(totalSelectedAmount)}
                     </p>
                   </div>
                   
                   {totalPaymentAmount && parseFloat(totalPaymentAmount) > totalSelectedAmount && (
                     <div className="bg-yellow-50 border border-yellow-200 rounded p-2">
                       <p className="text-xs text-yellow-800">
-                        Payment amount (Rs. {parseFloat(totalPaymentAmount).toFixed(2)}) exceeds total selected amount. 
-                        Remaining Rs. {(parseFloat(totalPaymentAmount) - totalSelectedAmount).toFixed(2)} will not be applied.
+                        Payment amount ({formatCurrency(parseFloat(totalPaymentAmount))}) exceeds total selected amount. 
+                        Remaining {formatCurrency(parseFloat(totalPaymentAmount) - totalSelectedAmount)} will not be applied.
                       </p>
                     </div>
                   )}
@@ -805,10 +871,11 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                     Credits will be settled in the order selected. Partial settlements create a new pending credit for the remaining balance.
                   </p>
                 </div>
+                )}
               </>
             ) : selectedCustomerId ? (
               <div className="py-2 text-center text-sm">
-                <p className="text-gray-500">No pending credits found for this customer.</p>
+                <p className="text-gray-500">No pending credits or opening balances found for this customer.</p>
               </div>
             ) : (
               <div className="py-2 text-center text-sm">
@@ -853,7 +920,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           <DialogHeader>
             <DialogTitle>Confirm Payment</DialogTitle>
             <DialogDescription>
-              You are about to settle Rs. {totalSelectedAmount.toFixed(2)} 
+              You are about to settle {formatCurrency(totalSelectedAmount)} 
               {customerCredits && ` for ${customerCredits.customerDetails.CusName}`}.
               Credits will be settled in the exact order they were selected.
             </DialogDescription>
@@ -871,10 +938,10 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                     return (
                       <li key={item.credit.CreditPaymentID}>
                         <span className="font-medium">#{index + 1}</span> · Invoice: {item.credit.InvoiceID || 'N/A'} · Due{" "}
-                        {format(new Date(item.credit.DueDate), 'yyyy-MM-dd')} · Settling Rs.{" "}
-                        {amount.toFixed(2)}
+                        {format(new Date(item.credit.DueDate), 'yyyy-MM-dd')} · Settling{" "}
+                        {formatCurrency(amount)}
                         {isPartial && (
-                          <span className="text-orange-600"> (Partial - Remaining: Rs. {(creditAmount - amount).toFixed(2)})</span>
+                          <span className="text-orange-600"> (Partial - Remaining: {formatCurrency(creditAmount - amount)})</span>
                         )}
                       </li>
                     );
