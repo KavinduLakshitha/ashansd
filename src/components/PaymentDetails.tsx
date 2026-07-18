@@ -492,6 +492,7 @@ interface ChequeDetails {
   chequeNumber: string;
   realizeDate: Date | null;
   bank: string;
+  receivedInHand: boolean;
 }
 
 interface PaymentDetailsProps {
@@ -581,9 +582,17 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
 
     const totalEntered = cashTotal + chequeTotal + creditTotal;
     
-    const areChequeDetailsValid = cheques.length === 0 || !cheques.some(cheque => 
-      !cheque.amount || !cheque.chequeNumber || !cheque.realizeDate || !cheque.bank
-    );
+    const areChequeDetailsValid = cheques.length === 0 || !cheques.some(cheque => {
+      if (!cheque.amount || !cheque.realizeDate) {
+        return true;
+      }
+
+      if (cheque.receivedInHand) {
+        return !cheque.chequeNumber || !cheque.bank;
+      }
+
+      return false;
+    });
     
     const isCreditValid = creditTotal === 0 || (creditTotal > 0 && dueDate !== null);
     
@@ -642,7 +651,8 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
       amount: '',
       chequeNumber: '',
       realizeDate: null,
-      bank: ''
+      bank: '',
+      receivedInHand: true,
     };
     
     setCheques([...cheques, newCheque]);
@@ -673,6 +683,8 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
       return;
     } else if (field === 'realizeDate') {
       updatedCheques[index][field] = value as Date | null;
+    } else if (field === 'receivedInHand') {
+      updatedCheques[index][field] = value as boolean;
     } else {
       updatedCheques[index][field] = value as string;
     }
@@ -717,7 +729,8 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
         amount: cheque.amount,
         chequeNumber: cheque.chequeNumber,
         realizeDate: cheque.realizeDate,
-        bank: cheque.bank
+        bank: cheque.bank,
+        receivedInHand: cheque.receivedInHand,
       }));
   
       const response = await axios.post(
@@ -903,6 +916,18 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
                 onChange={(e) => updateCheque(index, 'bank', e.target.value)}
               />
               <div></div>
+              <div className="col-span-3 flex items-center gap-2">
+                <Checkbox
+                  id={`cheque-received-${index}`}
+                  checked={cheque.receivedInHand}
+                  onCheckedChange={(checked) =>
+                    updateCheque(index, 'receivedInHand', checked === true)
+                  }
+                />
+                <Label htmlFor={`cheque-received-${index}`} className="text-xs font-normal">
+                  Cheque received in hand. Uncheck if awaiting receipt from customer.
+                </Label>
+              </div>
             </React.Fragment>
           ))}
 

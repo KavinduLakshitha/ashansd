@@ -60,6 +60,7 @@ interface ChequeEntry {
   bank: string;
   realizeDate: string;
   amount: string;
+  receivedInHand: boolean;
 }
 
 const createEmptyCheque = (): ChequeEntry => ({
@@ -67,6 +68,7 @@ const createEmptyCheque = (): ChequeEntry => ({
   bank: '',
   realizeDate: '',
   amount: '',
+  receivedInHand: true,
 });
 
 const formatCurrency = (amount: number) =>
@@ -450,15 +452,27 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     }
 
     if (paymentMethod === 'CHEQUE') {
-      const hasInvalidCheque = cheques.some(
-        (cheque) => !cheque.chequeNumber || !cheque.bank || !cheque.realizeDate
-      );
+      const hasInvalidCheque = cheques.some((cheque) => !cheque.realizeDate);
 
       if (hasInvalidCheque) {
         toast({
           variant: "destructive",
           title: "Missing Cheque Details",
-          description: "Each cheque requires a number, bank, and realize date.",
+          description: "Each cheque must include a realize date.",
+          duration: 3000,
+        });
+        return;
+      }
+
+      const missingInHandDetails = cheques.some(
+        (cheque) => cheque.receivedInHand && (!cheque.chequeNumber || !cheque.bank)
+      );
+
+      if (missingInHandDetails) {
+        toast({
+          variant: "destructive",
+          title: "Missing Cheque Details",
+          description: "Cheque number and bank are required when the cheque is already in hand.",
           duration: 3000,
         });
         return;
@@ -519,6 +533,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           chequeNumber: cheque.chequeNumber,
           bank: cheque.bank,
           realizeDate: cheque.realizeDate,
+          receivedInHand: cheque.receivedInHand,
           amount: cheques.length > 1
             ? parseFloat(cheque.amount)
             : parseFloat(totalSelectedAmount.toFixed(2)),
@@ -713,6 +728,19 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                   className="w-full"
                 />
               </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="settlement-cheque-received"
+                  checked={chequeDetails.receivedInHand}
+                  onCheckedChange={(checked) => setChequeDetails(prev => ({
+                    ...prev,
+                    receivedInHand: checked === true,
+                  }))}
+                />
+                <Label htmlFor="settlement-cheque-received" className="text-sm font-normal">
+                  Cheque received in hand (floating)
+                </Label>
+              </div>
               {cheques.slice(1).map((cheque, index) => (
                 <div key={index + 1} className="space-y-3 border rounded p-3">
                   <div className="flex items-center justify-between">
@@ -773,6 +801,18 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                         ))}
                       />
                     </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id={`settlement-cheque-received-${index + 1}`}
+                      checked={cheque.receivedInHand}
+                      onCheckedChange={(checked) => setCheques((prev) => prev.map((item, itemIndex) =>
+                        itemIndex === index + 1 ? { ...item, receivedInHand: checked === true } : item
+                      ))}
+                    />
+                    <Label htmlFor={`settlement-cheque-received-${index + 1}`} className="text-sm font-normal">
+                      Cheque received in hand (floating)
+                    </Label>
                   </div>
                 </div>
               ))}
@@ -1045,9 +1085,9 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                 hasInvalidSelection ||
                 totalSelectedAmount <= 0 ||
                 (paymentMethod === 'CHEQUE' &&
-                  (!chequeDetails.chequeNumber ||
-                    !chequeDetails.bank ||
-                    !chequeDetails.realizeDate))
+                  (!chequeDetails.realizeDate ||
+                    (chequeDetails.receivedInHand &&
+                      (!chequeDetails.chequeNumber || !chequeDetails.bank))))
               }
               className="mt-2"
             >
