@@ -30,6 +30,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isAxiosError } from 'axios';
 import { TooltipItem } from 'chart.js';
+import { formatMetricTons } from '@/lib/formatMetricTons';
 
 // Register ChartJS components
 ChartJS.register(
@@ -66,7 +67,7 @@ interface GroupedSaleData {
 
 type ChartType = 'line' | 'bar';
 
-import { formatMetricTons } from '@/lib/formatMetricTons';
+const formatCurrency = (value: number): string => {
   return new Intl.NumberFormat('en-LK', {
     style: 'currency',
     currency: 'LKR',
