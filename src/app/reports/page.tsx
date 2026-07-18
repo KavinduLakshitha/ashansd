@@ -6,6 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SalesTable from '@/components/SalesTable';
 import PurchaseReportsTable from '@/components/PurchaseReportsTable';
 import InventoryReport from '@/components/InventoryReport';
+import ProductReport from '@/components/ProductReport';
 import { useAuth } from '../auth/auth-context';
 import PaymentsHistory from '@/components/PaymentHistory';
 
@@ -23,6 +24,7 @@ export default function Reports() {
                 <TabsList className="ml-6">
                     <TabsTrigger value="sales">Sales</TabsTrigger>
                     <TabsTrigger value="purchases">Purchase</TabsTrigger>
+                    <TabsTrigger value="products">Products</TabsTrigger>
                     <TabsTrigger value="inventory">Inventory</TabsTrigger>
                     <TabsTrigger value="payments">Payments History</TabsTrigger>
                 </TabsList>
@@ -31,6 +33,9 @@ export default function Reports() {
                 </TabsContent>
                 <TabsContent value="purchases">
                     <PurchaseReportsTable />
+                </TabsContent>
+                <TabsContent value="products">
+                    <ProductReport />
                 </TabsContent>
                 <TabsContent value="inventory">
                   <InventoryReport businessLineId={businessLineId} />

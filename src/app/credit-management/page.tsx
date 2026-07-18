@@ -228,6 +228,11 @@ const PaymentManagement = () => {
     return { awaitingReceiptCheques: awaiting, floatingCheques: floating };
   }, [pendingPayments.pendingCheques]);
 
+  const chequeOnHandTotal = useMemo(
+    () => floatingCheques.reduce((sum, cheque) => sum + Number(cheque.Amount || 0), 0),
+    [floatingCheques]
+  );
+
   // State for confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
     isOpen: false,
@@ -858,6 +863,26 @@ const PaymentManagement = () => {
 
   return (
     <>
+      {floatingCheques.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 w-64">
+          <Card className="border-emerald-200 bg-emerald-50 shadow-lg">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-emerald-900">Cheque on Hand</p>
+                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
+                  {floatingCheques.length}
+                </span>
+              </div>
+              <p className="mt-1 text-2xl font-bold text-emerald-900">
+                {formatCurrency(chequeOnHandTotal)}
+              </p>
+              <p className="mt-1 text-xs text-emerald-700">
+                Cheques received and pending realization
+              </p>
+            </CardContent>
+          </Card>
+        </div>
+      )}
       <Card>
         <CardHeader className="bg-gray-50 border-b border-gray-200 flex flex-row items-start justify-between">
           <CardTitle className="text-xl font-semibold text-gray-800">
@@ -1042,13 +1067,13 @@ const PaymentManagement = () => {
           </Alert>
         )}
         
-        <Tabs defaultValue="cheques" className="mt-4 ml-4">
+        <Tabs defaultValue="credit" className="mt-4 ml-4">
           <TabsList>
-            <TabsTrigger value="cheques">
-              Pending Cheques ({pendingPayments.pendingCheques.length})
-            </TabsTrigger>
             <TabsTrigger value="credit">
               Pending Credits ({pendingCreditRows.length})
+            </TabsTrigger>
+            <TabsTrigger value="cheques">
+              Pending Cheques ({pendingPayments.pendingCheques.length})
             </TabsTrigger>
           </TabsList>
 

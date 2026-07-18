@@ -1014,14 +1014,14 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
               </Popover>
             </div>
             
-            <Button 
+            {/* <Button 
               variant="outline" 
               size="icon"
               onClick={() => setAsOfDate(new Date())}
               title="Refresh data"
             >
               <RefreshCw className="h-4 w-4" />
-            </Button>
+            </Button> */}
           </div>
 
           <div className="flex gap-2">

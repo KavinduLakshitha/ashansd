@@ -1114,10 +1114,10 @@ const handleDeleteStatusChange = async (change: PaymentStatusChange) => {
                   <Filter className="h-4 w-4 mr-2" />
                   Apply Filter
                 </Button>
-                <Button variant="outline" onClick={handleRefresh}>
+                {/* <Button variant="outline" onClick={handleRefresh}>
                   <RefreshCw className="h-4 w-4 mr-2" />
                   Refresh
-                </Button>
+                </Button> */}
                 <Button 
                   variant="outline" 
                   onClick={exportCurrentView}
