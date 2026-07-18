@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -10,6 +10,14 @@ import axios from "@/lib/api/axios";
 import { isAxiosError } from "axios";
 import { toast } from "@/hooks/use-toast";
 import VendorProductsTable from "@/components/PurchaseTable";
+import { formatMetricTons } from '@/lib/formatMetricTons';
+
+const formatDateForBackend = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 interface Vendor {
   VendorID: number;
@@ -28,6 +36,7 @@ export default function PurchaseManagementPage() {
   const { getBusinessLineID } = useAuth();  
   const [invoiceDate, setInvoiceDate] = useState<Date>(new Date());
   const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [totalMetricTons, setTotalMetricTons] = useState<number | null>(null);
 
   useEffect(() => {
     const fetchVendors = async () => {
@@ -75,6 +84,39 @@ export default function PurchaseManagementPage() {
     fetchVendors();
   }, [getBusinessLineID]);
 
+  useEffect(() => {
+    const fetchTotalMetricTons = async () => {
+      const businessLineId = getBusinessLineID();
+      if (!businessLineId) {
+        setTotalMetricTons(null);
+        return;
+      }
+
+      const purchaseDate = formatDateForBackend(invoiceDate);
+
+      try {
+        const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/purchases/daily-summary`, {
+          params: {
+            businessLineId,
+            startDate: purchaseDate,
+            endDate: purchaseDate,
+          },
+        });
+
+        const total = (response.data || []).reduce(
+          (sum: number, row: { totalMetricTons?: number }) => sum + Number(row.totalMetricTons || 0),
+          0
+        );
+        setTotalMetricTons(total);
+      } catch (error) {
+        console.error('Error fetching total metric tons:', error);
+        setTotalMetricTons(null);
+      }
+    };
+
+    fetchTotalMetricTons();
+  }, [getBusinessLineID, invoiceDate]);
+
   const handleDateChange = (date: Date) => {
     setInvoiceDate(date);
   };
@@ -103,6 +145,17 @@ export default function PurchaseManagementPage() {
       <CardHeader className="bg-gray-50 border-b border-gray-200 flex flex-row items-center justify-between">
         <CardTitle className="text-xl font-semibold text-gray-800">Purchase Management</CardTitle>        
       </CardHeader>
+
+      <div className="mx-1 mt-2">
+        <Card>
+          <CardContent className="py-4">
+            <div className="text-sm text-muted-foreground">Total Metric Tons (selected date)</div>
+            <div className="text-2xl font-bold">
+              {totalMetricTons === null ? '—' : formatMetricTons(totalMetricTons)}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="flex flex-col gap-1 ml-1 mt-1 mb-1 w-60">          
           <Select 

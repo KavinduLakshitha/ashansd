@@ -48,6 +48,7 @@ interface SaleData {
   date: Date;
   orderCount: number;
   totalAmount: number;
+  totalMetricTons: number;
   avgOrderValue: number;
   formattedDate: string;
   month: string;
@@ -59,12 +60,13 @@ interface GroupedSaleData {
   period: string;
   orderCount: number;
   totalAmount: number;
+  totalMetricTons: number;
   avgOrderValue: number;
 }
 
 type ChartType = 'line' | 'bar';
 
-const formatCurrency = (value: number): string => {
+import { formatMetricTons } from '@/lib/formatMetricTons';
   return new Intl.NumberFormat('en-LK', {
     style: 'currency',
     currency: 'LKR',
@@ -119,12 +121,14 @@ export default function SalesDashboard() {
           period: formattedDate,
           orderCount: 0,
           totalAmount: 0,
+          totalMetricTons: 0,
           avgOrderValue: 0
         };
       }
       
       groupedByDay[formattedDate].orderCount += item.orderCount;
       groupedByDay[formattedDate].totalAmount += item.totalAmount;
+      groupedByDay[formattedDate].totalMetricTons += item.totalMetricTons;
     });
     
     Object.keys(groupedByDay).forEach(key => {
@@ -171,7 +175,7 @@ export default function SalesDashboard() {
           }
         });
   
-        const processedData = response.data.map((item: { date: string; orderCount: number; totalAmount: number; avgOrderValue: number }) => {
+        const processedData = response.data.map((item: { date: string; orderCount: number; totalAmount: number; totalMetricTons?: number; avgOrderValue: number }) => {
           const date = new Date(item.date);
           return {
             ...item,
@@ -182,9 +186,10 @@ export default function SalesDashboard() {
             weekNumber: getWeekNumber(date),
             orderCount: Number(item.orderCount || 0),
             totalAmount: Number(item.totalAmount || 0),
+            totalMetricTons: Number(item.totalMetricTons || 0),
             avgOrderValue: Number(item.avgOrderValue || 0)
           };
-        }).sort((a: SaleData, b: SaleData) => a.date.getTime() - b.date.getTime());
+        }).sort((a: SaleData & { totalMetricTons: number }, b: SaleData & { totalMetricTons: number }) => a.date.getTime() - b.date.getTime());
   
         setSalesData(processedData);
         
@@ -225,7 +230,8 @@ export default function SalesDashboard() {
   }, [user?.currentBusinessLine]);
 
   const totalSales = groupedData.reduce((sum, period) => sum + period.totalAmount, 0);
-  const totalOrders = groupedData.reduce((sum, period) => sum + period.orderCount, 0);  
+  const totalOrders = groupedData.reduce((sum, period) => sum + period.orderCount, 0);
+  const totalMetricTons = groupedData.reduce((sum, period) => sum + period.totalMetricTons, 0);
   
   const chartData = {
     labels: groupedData.map(item => item.period),
@@ -401,7 +407,7 @@ export default function SalesDashboard() {
           </Alert>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
               <Card>
                 <CardContent className="pt-6">
                   <div className="text-sm text-muted-foreground">
@@ -411,6 +417,16 @@ export default function SalesDashboard() {
                     <Skeleton className="h-7 w-24 mt-1" />
                   ) : (
                     <div className="text-2xl font-bold">{formatCurrency(totalSales)}</div>
+                  )}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-sm text-muted-foreground">Total Metric Tons</div>
+                  {isLoading ? (
+                    <Skeleton className="h-7 w-24 mt-1" />
+                  ) : (
+                    <div className="text-2xl font-bold">{formatMetricTons(totalMetricTons)}</div>
                   )}
                 </CardContent>
               </Card>
