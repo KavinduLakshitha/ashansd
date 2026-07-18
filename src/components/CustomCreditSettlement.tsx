@@ -55,6 +55,20 @@ interface CustomerWithCredits {
   openingBalanceOutstanding: number;
 }
 
+interface ChequeEntry {
+  chequeNumber: string;
+  bank: string;
+  realizeDate: string;
+  amount: string;
+}
+
+const createEmptyCheque = (): ChequeEntry => ({
+  chequeNumber: '',
+  bank: '',
+  realizeDate: '',
+  amount: '',
+});
+
 const formatCurrency = (amount: number) =>
   `Rs. ${Number(amount).toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -95,11 +109,15 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('CASH');
-  const [chequeDetails, setChequeDetails] = useState({
-    chequeNumber: '',
-    bank: '',
-    realizeDate: ''
-  });
+  const [cheques, setCheques] = useState<ChequeEntry[]>([createEmptyCheque()]);
+  const chequeDetails = cheques[0] ?? createEmptyCheque();
+  const setChequeDetails = (updater: ChequeEntry | ((prev: ChequeEntry) => ChequeEntry)) => {
+    setCheques((prev) => {
+      const current = prev[0] ?? createEmptyCheque();
+      const next = typeof updater === 'function' ? updater(current) : updater;
+      return [next, ...prev.slice(1)];
+    });
+  };
   const [selectedItems, setSelectedItems] = useState<SelectedSettlementItem[]>([]);
   const [totalPaymentAmount, setTotalPaymentAmount] = useState<string>("");
   const [suggestedTotalPayment, setSuggestedTotalPayment] = useState<string>("");
@@ -113,11 +131,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       setCustomerCredits(null);
       setError("");
       setPaymentMethod('CASH');
-      setChequeDetails({
-          chequeNumber: '',
-          bank: '',
-          realizeDate: ''
-      });
+      setCheques([createEmptyCheque()]);
       setSelectedItems([]);
       setTotalPaymentAmount("");
       setSuggestedTotalPayment("");
@@ -435,17 +449,33 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       return;
     }
 
-    if (
-      paymentMethod === 'CHEQUE' &&
-      (!chequeDetails.chequeNumber || !chequeDetails.bank || !chequeDetails.realizeDate)
-    ) {
-      toast({
-        variant: "destructive",
-        title: "Missing Cheque Details",
-        description: "Cheque number, bank and realize date are required for cheque payments.",
-        duration: 3000,
-      });
-      return;
+    if (paymentMethod === 'CHEQUE') {
+      const hasInvalidCheque = cheques.some(
+        (cheque) => !cheque.chequeNumber || !cheque.bank || !cheque.realizeDate
+      );
+
+      if (hasInvalidCheque) {
+        toast({
+          variant: "destructive",
+          title: "Missing Cheque Details",
+          description: "Each cheque requires a number, bank, and realize date.",
+          duration: 3000,
+        });
+        return;
+      }
+
+      if (cheques.length > 1) {
+        const chequeTotal = cheques.reduce((sum, cheque) => sum + (parseFloat(cheque.amount) || 0), 0);
+        if (Math.abs(chequeTotal - totalSelectedAmount) > 0.01) {
+          toast({
+            variant: "destructive",
+            title: "Cheque Amount Mismatch",
+            description: "The total of all cheque amounts must match the settlement amount.",
+            duration: 3000,
+          });
+          return;
+        }
+      }
     }
     
     setConfirmDialogOpen(true);
@@ -484,7 +514,16 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
               amount: parseFloat(item.amount),
             }
       ),
-      ...(paymentMethod === 'CHEQUE' && { chequeDetails })
+      ...(paymentMethod === 'CHEQUE' && {
+        cheques: cheques.map((cheque) => ({
+          chequeNumber: cheque.chequeNumber,
+          bank: cheque.bank,
+          realizeDate: cheque.realizeDate,
+          amount: cheques.length > 1
+            ? parseFloat(cheque.amount)
+            : parseFloat(totalSelectedAmount.toFixed(2)),
+        })),
+      })
     };
     
     try {
@@ -624,6 +663,17 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
         {/* Cheque details - show only when CHEQUE is selected */}
         {paymentMethod === 'CHEQUE' && (
             <div className="space-y-3 border p-3 rounded">
+              <div className="flex items-center justify-between">
+                <Label>Cheque Details</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCheques((prev) => [...prev, createEmptyCheque()])}
+                >
+                  Add Cheque
+                </Button>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label htmlFor="cheque-number">Cheque Number</Label>
@@ -663,6 +713,69 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                   className="w-full"
                 />
               </div>
+              {cheques.slice(1).map((cheque, index) => (
+                <div key={index + 1} className="space-y-3 border rounded p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium">Cheque {index + 2}</p>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCheques((prev) => prev.filter((_, itemIndex) => itemIndex !== index + 1))}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor={`cheque-number-${index + 1}`}>Cheque Number</Label>
+                      <Input
+                        id={`cheque-number-${index + 1}`}
+                        value={cheque.chequeNumber}
+                        onChange={(e) => setCheques((prev) => prev.map((item, itemIndex) =>
+                          itemIndex === index + 1 ? { ...item, chequeNumber: e.target.value } : item
+                        ))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor={`bank-${index + 1}`}>Bank</Label>
+                      <Input
+                        id={`bank-${index + 1}`}
+                        value={cheque.bank}
+                        onChange={(e) => setCheques((prev) => prev.map((item, itemIndex) =>
+                          itemIndex === index + 1 ? { ...item, bank: e.target.value } : item
+                        ))}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label htmlFor={`realize-date-${index + 1}`}>Realize Date</Label>
+                      <Input
+                        id={`realize-date-${index + 1}`}
+                        type="date"
+                        value={cheque.realizeDate}
+                        onChange={(e) => setCheques((prev) => prev.map((item, itemIndex) =>
+                          itemIndex === index + 1 ? { ...item, realizeDate: e.target.value } : item
+                        ))}
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor={`cheque-amount-${index + 1}`}>Amount (Rs.)</Label>
+                      <Input
+                        id={`cheque-amount-${index + 1}`}
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={cheque.amount}
+                        onChange={(e) => setCheques((prev) => prev.map((item, itemIndex) =>
+                          itemIndex === index + 1 ? { ...item, amount: e.target.value } : item
+                        ))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
           

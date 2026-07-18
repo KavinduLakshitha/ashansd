@@ -99,6 +99,8 @@ export default function SalesDashboard() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ChartType>('line');
+  const [overviewMode, setOverviewMode] = useState<'sales' | 'purchases'>('sales');
+  const [totalOutstandingCredit, setTotalOutstandingCredit] = useState<number | null>(null);
   
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth());
@@ -160,7 +162,8 @@ export default function SalesDashboard() {
       setError(null);
       try {
         const { startDate, endDate } = getDateRange();  
-        const response = await axios.get('/sales/daily-summary', {
+        const endpoint = overviewMode === 'sales' ? '/sales/daily-summary' : '/purchases/daily-summary';
+        const response = await axios.get(endpoint, {
           params: {
             businessLineId: user.currentBusinessLine,
             startDate: startDate.toISOString().split('T')[0],
@@ -200,7 +203,26 @@ export default function SalesDashboard() {
     };
   
     fetchSalesData();
-  }, [user?.currentBusinessLine, selectedMonth, selectedYear]);
+  }, [user?.currentBusinessLine, selectedMonth, selectedYear, overviewMode]);
+
+  useEffect(() => {
+    const fetchOutstandingCredit = async () => {
+      if (!user?.currentBusinessLine) {
+        setTotalOutstandingCredit(null);
+        return;
+      }
+
+      try {
+        const response = await axios.get(`/payments/outstanding/${user.currentBusinessLine}`);
+        setTotalOutstandingCredit(Number(response.data.totalOutstanding || 0));
+      } catch (err) {
+        console.error('Error fetching outstanding credit:', err);
+        setTotalOutstandingCredit(null);
+      }
+    };
+
+    fetchOutstandingCredit();
+  }, [user?.currentBusinessLine]);
 
   const totalSales = groupedData.reduce((sum, period) => sum + period.totalAmount, 0);
   const totalOrders = groupedData.reduce((sum, period) => sum + period.orderCount, 0);  
@@ -209,7 +231,7 @@ export default function SalesDashboard() {
     labels: groupedData.map(item => item.period),
     datasets: [
       {
-        label: 'Sales (LKR)',
+        label: overviewMode === 'sales' ? 'Sales (LKR)' : 'Purchases (LKR)',
         data: groupedData.map(item => item.totalAmount),
         backgroundColor: 'rgba(75, 85, 99, 0.5)',
         borderColor: 'rgba(31, 41, 55, 1)',
@@ -316,10 +338,21 @@ export default function SalesDashboard() {
       <CardHeader>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
           <div>
-            <CardTitle>Sales Overview</CardTitle>
-            <CardDescription>Sales performance analysis</CardDescription>
+            <CardTitle>{overviewMode === 'sales' ? 'Sales Overview' : 'Purchase Overview'}</CardTitle>
+            <CardDescription>
+              {overviewMode === 'sales' ? 'Sales performance analysis' : 'Purchase performance analysis'}
+            </CardDescription>
           </div>
           <div className="mt-2 md:mt-0 flex items-center space-x-2">
+            <Select value={overviewMode} onValueChange={(value) => setOverviewMode(value as 'sales' | 'purchases')}>
+              <SelectTrigger className="w-[140px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sales">Sales</SelectItem>
+                <SelectItem value="purchases">Purchases</SelectItem>
+              </SelectContent>
+            </Select>
             <div className="flex items-center space-x-2">
               <Calendar className="w-4 h-4" />
               
@@ -371,7 +404,9 @@ export default function SalesDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
               <Card>
                 <CardContent className="pt-6">
-                  <div className="text-sm text-muted-foreground">Total Sales</div>
+                  <div className="text-sm text-muted-foreground">
+                    {overviewMode === 'sales' ? 'Total Sales' : 'Total Purchases'}
+                  </div>
                   {isLoading ? (
                     <Skeleton className="h-7 w-24 mt-1" />
                   ) : (
@@ -381,11 +416,23 @@ export default function SalesDashboard() {
               </Card>
               <Card>
                 <CardContent className="pt-6">
-                  <div className="text-sm text-muted-foreground">Total Orders</div>
+                  <div className="text-sm text-muted-foreground">
+                    {overviewMode === 'sales' ? 'Total Orders' : 'Total Purchase Orders'}
+                  </div>
                   {isLoading ? (
                     <Skeleton className="h-7 w-24 mt-1" />
                   ) : (
                     <div className="text-2xl font-bold">{totalOrders}</div>
+                  )}
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-sm text-muted-foreground">Total Outstanding Credit</div>
+                  {totalOutstandingCredit === null ? (
+                    <Skeleton className="h-7 w-24 mt-1" />
+                  ) : (
+                    <div className="text-2xl font-bold">{formatCurrency(totalOutstandingCredit)}</div>
                   )}
                 </CardContent>
               </Card>              
@@ -393,7 +440,9 @@ export default function SalesDashboard() {
 
             <Tabs defaultValue="line" value={activeTab} onValueChange={(value) => setActiveTab(value as ChartType)} className="flex-1 flex flex-col">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-medium">{monthNames[selectedMonth]} {selectedYear} Sales Trend</h3>
+                <h3 className="text-lg font-medium">
+                  {monthNames[selectedMonth]} {selectedYear} {overviewMode === 'sales' ? 'Sales' : 'Purchase'} Trend
+                </h3>
                 <TabsList>
                   <TabsTrigger value="line">Line</TabsTrigger>
                   <TabsTrigger value="bar">Bar</TabsTrigger>
@@ -405,7 +454,7 @@ export default function SalesDashboard() {
               ) : groupedData.length === 0 ? (
                 <div className="flex-1 flex justify-center items-center border border-dashed rounded-md min-h-[300px]">
                   <div className="text-center">
-                    <p className="text-muted-foreground">No sales data available for this period</p>
+                    <p className="text-muted-foreground">No {overviewMode} data available for this period</p>
                   </div>
                 </div>
               ) : (

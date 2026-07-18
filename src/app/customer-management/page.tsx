@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Trash, Loader2, ChevronDown } from "lucide-react";
+import { Edit, Trash, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import { useRouter } from "next/navigation";
 import AddCustomerDialog from "@/components/AddCustomer";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/auth/auth-context";
 import api from "@/lib/api/axios";
@@ -50,6 +50,15 @@ interface Customer {
   CreditBalance?: number;
   UpcomingCheques?: number;
   PendingCredits?: number;
+}
+
+interface CustomerSale {
+  SaleID: number;
+  InvoiceID: string;
+  Date: string;
+  TotalAmount: number;
+  Discount: number;
+  ItemCount: number;
 }
 
 interface ChildDependencyReference {
@@ -97,6 +106,9 @@ export default function CustomerManagement() {
   const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const [expandedCustomerId, setExpandedCustomerId] = useState<number | null>(null);
+  const [customerSales, setCustomerSales] = useState<Record<number, CustomerSale[]>>({});
+  const [loadingSalesFor, setLoadingSalesFor] = useState<number | null>(null);
   
   // Pagination state
   const [page, setPage] = useState(1);
@@ -234,6 +246,41 @@ export default function CustomerManagement() {
 
   const handleRowClick = (id: number) => {
     router.push(`/customer-details/${id}`);
+  };
+
+  const toggleCustomerExpansion = async (event: React.MouseEvent, customerId: number) => {
+    event.stopPropagation();
+
+    if (expandedCustomerId === customerId) {
+      setExpandedCustomerId(null);
+      return;
+    }
+
+    setExpandedCustomerId(customerId);
+
+    if (customerSales[customerId]) {
+      return;
+    }
+
+    try {
+      setLoadingSalesFor(customerId);
+      const response = await api.get(`/sales/customer/${customerId}/history`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+      });
+      setCustomerSales((prev) => ({
+        ...prev,
+        [customerId]: response.data,
+      }));
+    } catch (error) {
+      console.error(`Error fetching sales history for customer ${customerId}:`, error);
+      toast({
+        title: "Error",
+        description: "Failed to load customer sales history",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingSalesFor(null);
+    }
   };
 
   // Handle initiating the delete process
@@ -454,6 +501,7 @@ export default function CustomerManagement() {
                 <TableHeader className="bg-gray-50">
                   <TableRow className="border-b border-gray-200">
                     <TableCell className="font-bold border-r border-gray-200">Customer Code</TableCell>
+                    <TableCell className="font-bold border-r border-gray-200 w-10"></TableCell>
                     <TableCell className="font-bold border-r border-gray-200">Customer Name</TableCell>
                     <TableCell className="font-bold border-r border-gray-200">Credit Usage</TableCell>
                     <TableCell className="font-bold border-r border-gray-200">Upcoming Cheques</TableCell>
@@ -465,7 +513,7 @@ export default function CustomerManagement() {
                 <TableBody>
                   {filteredCustomers.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8">
+                      <TableCell colSpan={8} className="text-center py-8">
                         {searchTerm 
                           ? "No customers match your search criteria" 
                           : "No customers found"
@@ -475,13 +523,27 @@ export default function CustomerManagement() {
                   ) : (
                     <>
                       {filteredCustomers.map((customer) => (
+                        <Fragment key={customer.CustomerID}>
                         <TableRow
-                          key={customer.CustomerID}
                           className="cursor-pointer hover:bg-gray-100 border-b border-gray-200"
                           onClick={() => handleRowClick(customer.CustomerID)}
                         >
                           <TableCell className="border-r border-gray-200">
                             {generateCustomerCode(customer.CustomerID)}
+                          </TableCell>
+                          <TableCell className="border-r border-gray-200">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={(event) => toggleCustomerExpansion(event, customer.CustomerID)}
+                            >
+                              {expandedCustomerId === customer.CustomerID ? (
+                                <ChevronDown className="h-4 w-4" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </Button>
                           </TableCell>
                           <TableCell className="border-r border-gray-200">{customer.CusName}</TableCell>
                           <TableCell className={`border-r border-gray-200 ${getCreditUsageColor(customer.TotalOutstanding || 0, customer.CreditLimit)}`}>
@@ -518,12 +580,51 @@ export default function CustomerManagement() {
                             </div>
                           </TableCell>
                         </TableRow>
+                        {expandedCustomerId === customer.CustomerID && (
+                          <TableRow className="bg-gray-50 border-b border-gray-200">
+                            <TableCell colSpan={8} className="p-4">
+                              <div className="space-y-2">
+                                <p className="text-sm font-semibold text-gray-700">Recent Invoices</p>
+                                {loadingSalesFor === customer.CustomerID ? (
+                                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    Loading sales history...
+                                  </div>
+                                ) : (customerSales[customer.CustomerID]?.length ?? 0) === 0 ? (
+                                  <p className="text-sm text-muted-foreground">No sales invoices found.</p>
+                                ) : (
+                                  <Table>
+                                    <TableHeader>
+                                      <TableRow>
+                                        <TableCell className="font-semibold">Invoice</TableCell>
+                                        <TableCell className="font-semibold">Date</TableCell>
+                                        <TableCell className="font-semibold text-right">Items</TableCell>
+                                        <TableCell className="font-semibold text-right">Amount</TableCell>
+                                      </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                      {customerSales[customer.CustomerID]?.map((sale) => (
+                                        <TableRow key={sale.SaleID}>
+                                          <TableCell>{sale.InvoiceID}</TableCell>
+                                          <TableCell>{new Date(sale.Date).toLocaleDateString()}</TableCell>
+                                          <TableCell className="text-right">{sale.ItemCount}</TableCell>
+                                          <TableCell className="text-right">{formatCurrency(sale.TotalAmount)}</TableCell>
+                                        </TableRow>
+                                      ))}
+                                    </TableBody>
+                                  </Table>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
                       ))}
                       
                       {/* Load more button (only shown when not searching) */}
                       {!searchTerm && hasMore && (
                         <TableRow>
-                          <TableCell colSpan={7} className="text-center p-4">
+                          <TableCell colSpan={8} className="text-center p-4">
                             <Button 
                               variant="outline" 
                               onClick={loadMoreCustomers} 

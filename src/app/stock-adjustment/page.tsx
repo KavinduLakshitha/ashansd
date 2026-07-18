@@ -77,7 +77,7 @@ export default function StockAdjustmentPage() {
                     productId: product.ProductID,
                     itemName: product.Name,
                     availableQuantity: product.CurrentQTY,
-                    newQuantity: 0,
+                    newQuantity: product.CurrentQTY,
                     adjustedQuantity: 0
                   }));
 
@@ -132,9 +132,20 @@ export default function StockAdjustmentPage() {
 
     const updateNewQuantity = (index: number, value: string): void => {
         const updatedItems = [...inventoryItems];
-        const numericValue = value === "" ? "" : Number(value);
-        updatedItems[index].newQuantity = numericValue === "" ? 0 : numericValue;
-        updatedItems[index].adjustedQuantity = (numericValue === "" ? 0 : numericValue) - updatedItems[index].availableQuantity;
+        if (value === "" || value === "-") {
+            updatedItems[index].newQuantity = updatedItems[index].availableQuantity;
+            updatedItems[index].adjustedQuantity = 0;
+            setInventoryItems(updatedItems);
+            return;
+        }
+
+        const numericValue = Number(value);
+        if (Number.isNaN(numericValue)) {
+            return;
+        }
+
+        updatedItems[index].newQuantity = numericValue;
+        updatedItems[index].adjustedQuantity = numericValue - updatedItems[index].availableQuantity;
         setInventoryItems(updatedItems);
     };
 
@@ -153,7 +164,9 @@ export default function StockAdjustmentPage() {
                 return;
             }
 
-            const itemsWithChanges = inventoryItems.filter(item => item.newQuantity !== 0);
+            const itemsWithChanges = inventoryItems.filter(
+                item => item.newQuantity !== item.availableQuantity
+            );
             
             if (itemsWithChanges.length === 0) {
                 toast({
@@ -199,7 +212,7 @@ export default function StockAdjustmentPage() {
             // Reset form
             setInventoryItems(prev => prev.map(item => ({
                 ...item,
-                newQuantity: 0,
+                newQuantity: item.availableQuantity,
                 adjustedQuantity: 0
             })));
             setAdjustmentReason("");
@@ -296,11 +309,10 @@ export default function StockAdjustmentPage() {
                                         <TableCell>
                                         <Input 
                                             type="number" 
-                                            value={item.newQuantity === 0 ? "" : item.newQuantity}
+                                            value={item.adjustedQuantity === 0 ? "" : item.newQuantity}
                                             onChange={(e) => updateNewQuantity(index, e.target.value)}
                                             className="w-20"
-                                            min="0"
-                                            placeholder="0"
+                                            placeholder={String(item.availableQuantity)}
                                         />
                                         </TableCell>
                                         <TableCell>

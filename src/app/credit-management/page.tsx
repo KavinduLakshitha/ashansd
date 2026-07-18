@@ -172,6 +172,7 @@ const PaymentManagement = () => {
   const [processingIds, setProcessingIds] = useState<Set<string | number>>(new Set());
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<string>("all");
+  const [customerOutstanding, setCustomerOutstanding] = useState<number | null>(null);
   
   const [dateFilterMode, setDateFilterMode] = useState<'range' | 'upTo' | 'on'>('range');
   const [upToDate, setUpToDate] = useState(new Date());
@@ -320,6 +321,27 @@ const PaymentManagement = () => {
   useEffect(() => {
     fetchPendingPayments();
   }, [fetchPendingPayments]);
+
+  useEffect(() => {
+    const fetchCustomerOutstanding = async () => {
+      if (!selectedCustomer || selectedCustomer === 'all') {
+        setCustomerOutstanding(null);
+        return;
+      }
+
+      try {
+        const response = await axios.get(
+          `${process.env.NEXT_PUBLIC_API_URL}/payments/customer/${selectedCustomer}/outstanding`
+        );
+        setCustomerOutstanding(Number(response.data.TotalOutstanding || 0));
+      } catch (err) {
+        console.error('Error fetching customer outstanding:', err);
+        setCustomerOutstanding(null);
+      }
+    };
+
+    fetchCustomerOutstanding();
+  }, [selectedCustomer, pendingPayments]);
 
   // Open confirmation dialog for Realize Cheque
   const confirmRealizeCheque = (cheque: Cheque) => {
@@ -895,6 +917,24 @@ const PaymentManagement = () => {
           </div>
           
         </CardHeader>
+
+        {selectedCustomer !== 'all' && customerOutstanding !== null && (
+          <div className="mx-4 mt-4">
+            <Card>
+              <CardContent className="pt-6">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Customer Total Outstanding</p>
+                    <p className="text-2xl font-bold">{formatCurrency(customerOutstanding)}</p>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {customers.find((customer) => customer.CustomerID.toString() === selectedCustomer)?.CustomerName}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        )}
         
         {error && (
           <Alert variant="destructive" className="m-4">

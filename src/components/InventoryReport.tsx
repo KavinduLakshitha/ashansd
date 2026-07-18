@@ -22,6 +22,10 @@ interface Product {
   CurrentQTY: number;
   MinimumQTY: number;
   AverageCost?: number;
+  LastPurchasePrice?: number;
+  LastSalePrice?: number;
+  Profit?: number | null;
+  Margin?: number | null;
   LastUpdated?: string;
   BusinessLineID: number;
   TotalStock?: number;
@@ -97,7 +101,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
   const [selectedProduct, setSelectedProduct] = useState<string>('all');
   const [movementType, setMovementType] = useState<string>('all');
   const [totalItems, setTotalItems] = useState<number>(0);
-  const [, setTotalValue] = useState<number>(0);
+  const [totalValue, setTotalValue] = useState<number>(0);
   const [lowStockItems, setLowStockItems] = useState<number>(0);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
@@ -1086,6 +1090,22 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
               <p className="text-xs text-muted-foreground">As of {format(asOfDate, 'PPP')}</p>
             </CardContent>
           </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium">Total Stock Value</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">
+                {new Intl.NumberFormat('en-US', {
+                  style: 'currency',
+                  currency: 'LKR',
+                  maximumFractionDigits: 0,
+                }).format(totalValue)}
+              </div>
+              <p className="text-xs text-muted-foreground">Current qty × average cost</p>
+            </CardContent>
+          </Card>
                       
           <Card>
             <CardHeader className="pb-2">
@@ -1137,6 +1157,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                           <TableHead>Product</TableHead>
                           <TableHead className="text-right">Current Qty</TableHead>
                           <TableHead className="text-right">Min Qty</TableHead>
+                          <TableHead className="text-right">Profit</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead className="text-right">Value</TableHead>
                           <TableHead>Last Updated</TableHead>
@@ -1145,7 +1166,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                       <TableBody>
                         {filteredProducts.length === 0 ? (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                            <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                               No inventory items found
                             </TableCell>
                           </TableRow>
@@ -1156,6 +1177,23 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                               <TableCell className="font-medium">{product.Name}</TableCell>
                               <TableCell className="text-right">{product.CurrentQTY}</TableCell>
                               <TableCell className="text-right">{product.MinimumQTY || 0}</TableCell>
+                              <TableCell className="text-right">
+                                {product.Profit != null ? (
+                                  <span className={product.Profit >= 0 ? 'text-green-700' : 'text-red-600'}>
+                                    {new Intl.NumberFormat('en-US', {
+                                      style: 'currency',
+                                      currency: 'LKR',
+                                    }).format(product.Profit)}
+                                    {product.Margin != null && (
+                                      <span className="block text-xs text-muted-foreground">
+                                        {product.Margin.toFixed(1)}% margin
+                                      </span>
+                                    )}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 {product.Status ? (
                                   <Badge
