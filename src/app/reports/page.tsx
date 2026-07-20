@@ -7,6 +7,7 @@ import SalesTable from '@/components/SalesTable';
 import PurchaseReportsTable from '@/components/PurchaseReportsTable';
 import InventoryReport from '@/components/InventoryReport';
 import ProductReport from '@/components/ProductReport';
+import ProfitLossReport from '@/components/ProfitLossReport';
 import { useAuth } from '../auth/auth-context';
 import PaymentsHistory from '@/components/PaymentHistory';
 
@@ -21,11 +22,12 @@ export default function Reports() {
                 <CardTitle className="text-xl font-semibold text-gray-800">Reports</CardTitle>                
             </CardHeader>
             <Tabs defaultValue="sales" onValueChange={(value) => setActiveTab(value)} className='mt-4'>
-                <TabsList className="ml-6">
+                <TabsList className="ml-6 flex flex-wrap h-auto">
                     <TabsTrigger value="sales">Sales</TabsTrigger>
                     <TabsTrigger value="purchases">Purchase</TabsTrigger>
                     <TabsTrigger value="products">Products</TabsTrigger>
                     <TabsTrigger value="inventory">Inventory</TabsTrigger>
+                    <TabsTrigger value="pnl">P&amp;L</TabsTrigger>
                     <TabsTrigger value="payments">Payments History</TabsTrigger>
                 </TabsList>
                 <TabsContent value="sales">
@@ -39,6 +41,9 @@ export default function Reports() {
                 </TabsContent>
                 <TabsContent value="inventory">
                   <InventoryReport businessLineId={businessLineId} />
+                </TabsContent>
+                <TabsContent value="pnl">
+                    <ProfitLossReport />
                 </TabsContent>
                 <TabsContent value="payments">
                     <PaymentsHistory />

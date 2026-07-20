@@ -104,6 +104,7 @@ export default function SalesDashboard() {
   const [activeTab, setActiveTab] = useState<ChartType>('line');
   const [overviewMode, setOverviewMode] = useState<'sales' | 'purchases'>('sales');
   const [totalOutstandingCredit, setTotalOutstandingCredit] = useState<number | null>(null);
+  const [bankBalance, setBankBalance] = useState<number | null>(null);
   
   const currentDate = new Date();
   const [selectedMonth, setSelectedMonth] = useState<number>(currentDate.getMonth());
@@ -228,6 +229,27 @@ export default function SalesDashboard() {
     };
 
     fetchOutstandingCredit();
+  }, [user?.currentBusinessLine]);
+
+  useEffect(() => {
+    const fetchBankBalance = async () => {
+      if (!user?.currentBusinessLine) {
+        setBankBalance(null);
+        return;
+      }
+
+      try {
+        const response = await axios.get('/cashbook/balances', {
+          params: { businessLineId: user.currentBusinessLine },
+        });
+        setBankBalance(Number(response.data.bankBalance || 0));
+      } catch (err) {
+        console.error('Error fetching bank balance:', err);
+        setBankBalance(null);
+      }
+    };
+
+    fetchBankBalance();
   }, [user?.currentBusinessLine]);
 
   const totalSales = groupedData.reduce((sum, period) => sum + period.totalAmount, 0);
@@ -408,7 +430,7 @@ export default function SalesDashboard() {
           </Alert>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-6">
               <Card>
                 <CardContent className="pt-6">
                   <div className="text-sm text-muted-foreground">
@@ -452,7 +474,17 @@ export default function SalesDashboard() {
                     <div className="text-2xl font-bold">{formatCurrency(totalOutstandingCredit)}</div>
                   )}
                 </CardContent>
-              </Card>              
+              </Card>
+              <Card>
+                <CardContent className="pt-6">
+                  <div className="text-sm text-muted-foreground">Bank Balance</div>
+                  {bankBalance === null ? (
+                    <Skeleton className="h-7 w-24 mt-1" />
+                  ) : (
+                    <div className="text-2xl font-bold">{formatCurrency(bankBalance)}</div>
+                  )}
+                </CardContent>
+              </Card>
             </div>
 
             <Tabs defaultValue="line" value={activeTab} onValueChange={(value) => setActiveTab(value as ChartType)} className="flex-1 flex flex-col">

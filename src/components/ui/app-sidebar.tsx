@@ -12,6 +12,7 @@ import {
     FileText,
     Box,
     Briefcase,
+    BookOpen,
     LogOut
 } from "lucide-react";
 import { useAuth } from "@/app/auth/auth-context";
@@ -49,6 +50,7 @@ const allNavigationItems = [
     { name: "Reports", href: "/reports", icon: FileText, roles: ["superuser", "admin", "management"] },
     { name: "Users", href: "/users", icon: Users, roles: ["superuser", "admin"] },
     { name: "Credit Management", href: "/credit-management", icon: DollarSign, roles: ["superuser", "admin", "management"] },
+    { name: "Cashbook", href: "/cashbook", icon: BookOpen, roles: ["superuser", "admin", "management"] },
     { name: "Opening Balances", href: "/opening-balances", icon: DollarSign, roles: ["superuser", "admin", "management"] },
 ];
 
