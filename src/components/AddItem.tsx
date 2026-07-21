@@ -29,7 +29,7 @@ interface Product {
   ProductID: number;
   Name: string;
   BusinessLineID: string;
-  VendorID?: string;
+  VendorID?: string | number;
   CurrentQTY: number;
   BusinessLineName?: string;
 }
@@ -59,7 +59,10 @@ const ProductDialog = ({ open, onClose, onProductSaved, product }: ProductDialog
     if (product) {
       setFormData({
         name: product.Name,
-        vendorId: product.VendorID || "",
+        // Select values are strings; coerce VendorID so the dropdown matches
+        vendorId: product.VendorID != null && product.VendorID !== ''
+          ? String(product.VendorID)
+          : "",
         vendorIds: []
       });
     } else {
@@ -70,7 +73,7 @@ const ProductDialog = ({ open, onClose, onProductSaved, product }: ProductDialog
         vendorIds: []
       });
     }
-  }, [product]);
+  }, [product, open]);
 
   useEffect(() => {
     if (open) {

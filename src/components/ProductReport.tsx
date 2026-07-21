@@ -38,6 +38,11 @@ const formatCurrency = (value: number): string =>
     maximumFractionDigits: 2,
   }).format(value);
 
+const formatUnits = (value: number): string =>
+  Number(value).toLocaleString(undefined, {
+    maximumFractionDigits: 3,
+  });
+
 const ProductReport = () => {
   const { getBusinessLineID } = useAuth();
   const [products, setProducts] = useState<ProductSalesRow[]>([]);
@@ -68,7 +73,27 @@ const ProductReport = () => {
       }
 
       const response = await axios.get('/sales/product-report', { params });
-      setProducts(Array.isArray(response.data) ? response.data : []);
+      const rows: ProductSalesRow[] = Array.isArray(response.data) ? response.data : [];
+
+      // console.group('[ProductReport] MT values from API');
+      // console.table(
+      //   rows.map((p) => ({
+      //     product: p.ProductName,
+      //     orders: p.orderCount,
+      //     unitsSold: p.totalQuantity,
+      //     metricTons: p.totalMetricTons,
+      //     expectedIf50kg: Number(p.totalQuantity || 0) * 50 / 1000,
+      //   }))
+      // );
+      // console.log(
+      //   'Totals → units:',
+      //   rows.reduce((s, p) => s + Number(p.totalQuantity || 0), 0),
+      //   '| MT:',
+      //   rows.reduce((s, p) => s + Number(p.totalMetricTons || 0), 0)
+      // );
+      // console.groupEnd();
+
+      setProducts(rows);
     } catch (err) {
       console.error('Error fetching product report:', err);
       if (isAxiosError(err)) {
@@ -109,11 +134,12 @@ const ProductReport = () => {
     return products.reduce(
       (acc, product) => {
         acc.revenue += Number(product.totalRevenue || 0);
-        acc.quantity += Number(product.totalMetricTons || 0);
+        acc.units += Number(product.totalQuantity || 0);
+        acc.metricTons += Number(product.totalMetricTons || 0);
         acc.profit += Number(product.totalProfit || 0);
         return acc;
       },
-      { revenue: 0, quantity: 0, profit: 0 }
+      { revenue: 0, units: 0, metricTons: 0, profit: 0 }
     );
   }, [products]);
 
@@ -140,7 +166,7 @@ const ProductReport = () => {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <Card>
           <CardContent className="pt-6">
             <div className="text-sm text-muted-foreground">Total Revenue</div>
@@ -153,11 +179,21 @@ const ProductReport = () => {
         </Card>
         <Card>
           <CardContent className="pt-6">
+            <div className="text-sm text-muted-foreground">Total Units Sold</div>
+            {loading ? (
+              <Skeleton className="h-7 w-28 mt-1" />
+            ) : (
+              <div className="text-2xl font-bold">{formatUnits(totals.units)}</div>
+            )}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-6">
             <div className="text-sm text-muted-foreground">Total Metric Tons Sold</div>
             {loading ? (
               <Skeleton className="h-7 w-28 mt-1" />
             ) : (
-              <div className="text-2xl font-bold">{formatMetricTons(totals.quantity)}</div>
+              <div className="text-2xl font-bold">{formatMetricTons(totals.metricTons)}</div>
             )}
           </CardContent>
         </Card>
@@ -189,7 +225,8 @@ const ProductReport = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Product</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Units</TableHead>
+                  <TableHead className="text-right">MT</TableHead>
                   <TableHead className="text-right">Revenue</TableHead>
                 </TableRow>
               </TableHeader>
@@ -197,13 +234,14 @@ const ProductReport = () => {
                 {highestSellers.map((product) => (
                   <TableRow key={`high-${product.ProductID}`}>
                     <TableCell className="font-medium">{product.ProductName}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatUnits(product.totalQuantity)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalMetricTons)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(product.totalRevenue)}</TableCell>
                   </TableRow>
                 ))}
                 {!loading && highestSellers.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={4} className="text-center py-4 text-muted-foreground">
                       No sales in this period
                     </TableCell>
                   </TableRow>
@@ -226,7 +264,8 @@ const ProductReport = () => {
               <TableHeader>
                 <TableRow>
                   <TableHead>Product</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
+                  <TableHead className="text-right">Units</TableHead>
+                  <TableHead className="text-right">MT</TableHead>
                   <TableHead className="text-right">Revenue</TableHead>
                 </TableRow>
               </TableHeader>
@@ -234,13 +273,14 @@ const ProductReport = () => {
                 {lowestSellers.map((product) => (
                   <TableRow key={`low-${product.ProductID}`}>
                     <TableCell className="font-medium">{product.ProductName}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatUnits(product.totalQuantity)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalMetricTons)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(product.totalRevenue)}</TableCell>
                   </TableRow>
                 ))}
                 {!loading && lowestSellers.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={4} className="text-center py-4 text-muted-foreground">
                       No sales in this period
                     </TableCell>
                   </TableRow>
@@ -274,7 +314,7 @@ const ProductReport = () => {
                 className="rounded-none"
                 onClick={() => setSortKey('totalMetricTons')}
               >
-                Quantity
+                Metric Tons
               </Button>
               <Button
                 variant={sortKey === 'totalProfit' ? 'default' : 'ghost'}
@@ -299,7 +339,8 @@ const ProductReport = () => {
               <TableHeader className="bg-gray-50">
                 <TableRow>
                   <TableHead className="font-bold text-black">Product</TableHead>
-                  <TableHead className="font-bold text-black text-right">Qty Sold</TableHead>
+                  <TableHead className="font-bold text-black text-right">Units Sold</TableHead>
+                  <TableHead className="font-bold text-black text-right">Metric Tons</TableHead>
                   <TableHead className="font-bold text-black text-right">Orders</TableHead>
                   <TableHead className="font-bold text-black text-right">Avg Sale Price</TableHead>
                   <TableHead className="font-bold text-black text-right">Last Purchase</TableHead>
@@ -311,6 +352,7 @@ const ProductReport = () => {
                 {sortedProducts.map((product) => (
                   <TableRow key={product.ProductID}>
                     <TableCell className="font-medium">{product.ProductName}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatUnits(product.totalQuantity)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalMetricTons)}</TableCell>
                     <TableCell className="text-right tabular-nums">{product.orderCount}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(product.avgSalePrice)}</TableCell>
@@ -336,7 +378,7 @@ const ProductReport = () => {
                 ))}
                 {sortedProducts.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-4 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-4 text-muted-foreground">
                       No product sales found for this period
                     </TableCell>
                   </TableRow>
