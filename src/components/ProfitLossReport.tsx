@@ -124,9 +124,9 @@ const ProfitLossReport = () => {
         </div>
         <div className="flex items-center gap-2">
           <DatePickerWithRange selected={dateRange} onChange={setDateRange} />
-          <Button variant="outline" size="icon" onClick={fetchReport} title="Refresh">
+          {/* <Button variant="outline" size="icon" onClick={fetchReport} title="Refresh">
             <RefreshCw className="h-4 w-4" />
-          </Button>
+          </Button> */}
         </div>
       </div>
 

@@ -310,7 +310,7 @@ const SalesTable = () => {
   }, [getBusinessLineID, filters.dateRange]);
 
   const fetchSaleItems = async (saleId: string) => {
-    console.log(saleId);
+    // console.log(saleId);
     try {
       setLoadingItems(prev => ({ ...prev, [saleId]: true }));
       
@@ -547,8 +547,8 @@ const SalesTable = () => {
       const invoiceSales = groupedSales[invoiceId];
       const items = saleItems[saleId];
 
-      console.log('Invoice Sales:', invoiceSales);
-      console.log('Sale Items:', items);
+      // console.log('Invoice Sales:', invoiceSales);
+      // console.log('Sale Items:', items);
 
       if (!invoiceSales || !items) {
         console.error('No data available for download');

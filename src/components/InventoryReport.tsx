@@ -218,7 +218,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
         }
   
         const data = await response.json() as StockMovement[];
-        console.log("Movements API response:", data);
+        // console.log("Movements API response:", data);
         setMovements(data);
       } catch (error) {
         console.error('Error fetching movement history:', error);

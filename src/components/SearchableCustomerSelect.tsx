@@ -62,7 +62,7 @@ export default function SearchableCustomerSelect({
         }
       });
 
-      console.log("API Response:", response.data);
+      // console.log("API Response:", response.data);
 
       if (response.data && response.data.data) {
         const customersArray = response.data.data;
@@ -116,7 +116,7 @@ export default function SearchableCustomerSelect({
   );
 
   const handleSelect = (customer: Customer) => {
-    console.log("Selected customer:", customer);
+    // console.log("Selected customer:", customer);
     onChange(customer.CusName, customer.CustomerID);
     if (onSelectCustomer) {
       onSelectCustomer(customer);

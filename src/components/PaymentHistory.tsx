@@ -929,13 +929,13 @@ const handleDeleteStatusChange = async (change: PaymentStatusChange) => {
       let endpoint: string;
       let paymentId: string | number;
 
-      console.log('Delete request for change:', {
-        id: change.id,
-        paymentMethod: change.paymentMethod,
-        chequePaymentId: change.chequePaymentId,
-        creditPaymentId: change.creditPaymentId,
-        paymentId: change.paymentId
-      });
+      // console.log('Delete request for change:', {
+      //   id: change.id,
+      //   paymentMethod: change.paymentMethod,
+      //   chequePaymentId: change.chequePaymentId,
+      //   creditPaymentId: change.creditPaymentId,
+      //   paymentId: change.paymentId
+      // });
 
       if (change.paymentMethod === 'CHEQUE') {
         // Try to use chequePaymentId first, then fall back to paymentId

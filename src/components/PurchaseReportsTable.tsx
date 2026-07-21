@@ -180,7 +180,7 @@ const PurchaseReportsTable = () => {
       });
 
       // Show success message (you can customize this)
-      console.log('Purchase deleted successfully:', response.data);
+      //  console.log('Purchase deleted successfully:', response.data);
       
       // Close dialog
       setDeleteDialog({
@@ -902,7 +902,7 @@ const PurchaseReportsTable = () => {
     try {
       setError(null);
       const url = `${process.env.NEXT_PUBLIC_API_URL}/purchases/report/${purchaseId}/excel`;
-      console.log('Attempting Excel download from:', url);
+      // console.log('Attempting Excel download from:', url);
       const response = await axios.get(
         url,
         { 
