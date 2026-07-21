@@ -333,9 +333,9 @@ export default function CashbookPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            <Button variant="outline" size="icon" onClick={fetchData} title="Refresh">
+            {/* <Button variant="outline" size="icon" onClick={fetchData} title="Refresh">
               <RefreshCw className="h-4 w-4" />
-            </Button>
+            </Button> */}
           </div>
 
           <div className="rounded-md border">

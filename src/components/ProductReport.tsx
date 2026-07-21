@@ -19,6 +19,7 @@ interface ProductSalesRow {
   ProductID: number;
   ProductName: string;
   totalQuantity: number;
+  totalMetricTons: number;
   totalRevenue: number;
   orderCount: number;
   avgSalePrice: number;
@@ -28,7 +29,7 @@ interface ProductSalesRow {
   margin: number | null;
 }
 
-type SortKey = 'totalRevenue' | 'totalQuantity' | 'totalProfit';
+type SortKey = 'totalRevenue' | 'totalMetricTons' | 'totalProfit';
 
 const formatCurrency = (value: number): string =>
   new Intl.NumberFormat('en-LK', {
@@ -108,7 +109,7 @@ const ProductReport = () => {
     return products.reduce(
       (acc, product) => {
         acc.revenue += Number(product.totalRevenue || 0);
-        acc.quantity += Number(product.totalQuantity || 0);
+        acc.quantity += Number(product.totalMetricTons || 0);
         acc.profit += Number(product.totalProfit || 0);
         return acc;
       },
@@ -152,7 +153,7 @@ const ProductReport = () => {
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="text-sm text-muted-foreground">Total Quantity Sold</div>
+            <div className="text-sm text-muted-foreground">Total Metric Tons Sold</div>
             {loading ? (
               <Skeleton className="h-7 w-28 mt-1" />
             ) : (
@@ -196,7 +197,7 @@ const ProductReport = () => {
                 {highestSellers.map((product) => (
                   <TableRow key={`high-${product.ProductID}`}>
                     <TableCell className="font-medium">{product.ProductName}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalQuantity)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalMetricTons)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(product.totalRevenue)}</TableCell>
                   </TableRow>
                 ))}
@@ -233,7 +234,7 @@ const ProductReport = () => {
                 {lowestSellers.map((product) => (
                   <TableRow key={`low-${product.ProductID}`}>
                     <TableCell className="font-medium">{product.ProductName}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalQuantity)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalMetricTons)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(product.totalRevenue)}</TableCell>
                   </TableRow>
                 ))}
@@ -268,10 +269,10 @@ const ProductReport = () => {
                 Revenue
               </Button>
               <Button
-                variant={sortKey === 'totalQuantity' ? 'default' : 'ghost'}
+                variant={sortKey === 'totalMetricTons' ? 'default' : 'ghost'}
                 size="sm"
                 className="rounded-none"
-                onClick={() => setSortKey('totalQuantity')}
+                onClick={() => setSortKey('totalMetricTons')}
               >
                 Quantity
               </Button>
@@ -310,7 +311,7 @@ const ProductReport = () => {
                 {sortedProducts.map((product) => (
                   <TableRow key={product.ProductID}>
                     <TableCell className="font-medium">{product.ProductName}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalQuantity)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatMetricTons(product.totalMetricTons)}</TableCell>
                     <TableCell className="text-right tabular-nums">{product.orderCount}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatCurrency(product.avgSalePrice)}</TableCell>
                     <TableCell className="text-right tabular-nums">
