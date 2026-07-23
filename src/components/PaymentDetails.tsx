@@ -794,7 +794,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
             placeholder="Leave empty for auto-generated"
             onChange={(e) => setCustomInvoiceNumber(e.target.value)}
           />
-          <div className='text-xs text-gray-500 ml-10'>Optional</div>
+          <div className='text-xs text-gray-500 ml-12'>Optional</div>
 
           {!isStockIn && (
             <>

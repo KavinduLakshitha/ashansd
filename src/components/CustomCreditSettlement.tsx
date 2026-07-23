@@ -43,6 +43,14 @@ interface OpeningBalance {
   ReferenceID: string;
 }
 
+interface Cheque {
+  ChequePaymentID: string | number;
+  ChequeNumber: string;
+  Bank: string;
+  RealizeDate: string;
+  Amount: number;
+}
+
 interface CustomerWithCredits {
   customerDetails: {
     CustomerID: number;
@@ -51,6 +59,7 @@ interface CustomerWithCredits {
   };
   pendingCredits: Credit[];
   pendingOpeningBalances: OpeningBalance[];
+  pendingCheques: Cheque[];
   totalOutstanding: number;
   openingBalanceOutstanding: number;
 }
@@ -174,6 +183,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           customerDetails: customerResponse.data,
           pendingCredits: pendingResponse.data.pendingCredits || [],
           pendingOpeningBalances: pendingResponse.data.pendingOpeningBalances || [],
+          pendingCheques: pendingResponse.data.pendingCheques || [],
           totalOutstanding: outstandingResponse.data.TotalOutstanding,
           openingBalanceOutstanding: outstandingResponse.data.OpeningBalanceOutstanding || 0,
         });
@@ -397,6 +407,40 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       return sum + value;
     }, 0);
   }, [selectedItems]);
+
+  const totalCreditAmount = useMemo(() => {
+    if (!customerCredits) {
+      return 0;
+    }
+
+    const creditsTotal = customerCredits.pendingCredits.reduce(
+      (sum, credit) => sum + Number(credit.Amount || 0),
+      0
+    );
+    const openingTotal = customerCredits.pendingOpeningBalances.reduce(
+      (sum, openingBalance) => sum + Number(openingBalance.Amount || 0),
+      0
+    );
+
+    return creditsTotal + openingTotal;
+  }, [customerCredits]);
+
+  const totalChequeAmount = useMemo(() => {
+    if (!customerCredits) {
+      return 0;
+    }
+
+    return customerCredits.pendingCheques.reduce(
+      (sum, cheque) => sum + Number(cheque.Amount || 0),
+      0
+    );
+  }, [customerCredits]);
+
+  const hasPendingSettlementItems = Boolean(
+    customerCredits &&
+      (customerCredits.pendingCredits.length > 0 ||
+        customerCredits.pendingOpeningBalances.length > 0)
+  );
 
   const hasInvalidSelection = useMemo(() => {
     if (selectedItems.length === 0) {
@@ -840,10 +884,23 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
               <div className="flex justify-center py-4">
                 <p>Loading customer data...</p>
               </div>
-            ) : customerCredits &&
-              (customerCredits.pendingCredits.length > 0 ||
-                customerCredits.pendingOpeningBalances.length > 0) ? (
+            ) : customerCredits ? (
               <>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="rounded-md border border-blue-100 bg-blue-50 p-4">
+                    <p className="text-sm text-blue-700">Total Credit</p>
+                    <p className="text-2xl font-bold tabular-nums text-blue-900">
+                      {formatCurrency(totalCreditAmount)}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-emerald-100 bg-emerald-50 p-4">
+                    <p className="text-sm text-emerald-700">Total Cheque</p>
+                    <p className="text-2xl font-bold tabular-nums text-emerald-900">
+                      {formatCurrency(totalChequeAmount)}
+                    </p>
+                  </div>
+                </div>
+
                 {/* Customer Summary */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 bg-gray-50 p-4 rounded-md">
                   <div>
@@ -872,6 +929,8 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                   </div>
                 </div>
                 
+                {hasPendingSettlementItems ? (
+                  <>
                 {/* Pending Credits Table */}
                 <div className="max-h-[300px] overflow-x-auto overflow-y-auto">
                   <h3 className="text-md font-medium mb-2">Pending Credits</h3>
@@ -1056,6 +1115,12 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                     Items will be settled in the order selected. Partial credit settlements create a new pending credit for the remaining balance.
                   </p>
                 </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-center text-gray-500">
+                    No pending credits or opening balances found for this customer.
+                  </p>
+                )}
               </>
             ) : selectedCustomerId ? (
               <div className="py-2 text-center text-sm">

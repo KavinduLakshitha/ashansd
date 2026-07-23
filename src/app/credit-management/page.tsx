@@ -233,6 +233,28 @@ const PaymentManagement = () => {
     [floatingCheques]
   );
 
+  const totalCreditAmount = useMemo(() => {
+    const creditsTotal = pendingPayments.pendingCredits.reduce(
+      (sum, credit) => sum + Number(credit.Amount || 0),
+      0
+    );
+    const openingTotal = pendingPayments.pendingOpeningBalances.reduce(
+      (sum, openingBalance) => sum + Number(openingBalance.Amount || 0),
+      0
+    );
+
+    return creditsTotal + openingTotal;
+  }, [pendingPayments.pendingCredits, pendingPayments.pendingOpeningBalances]);
+
+  const totalChequeAmount = useMemo(
+    () =>
+      pendingPayments.pendingCheques.reduce(
+        (sum, cheque) => sum + Number(cheque.Amount || 0),
+        0
+      ),
+    [pendingPayments.pendingCheques]
+  );
+
   // State for confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
     isOpen: false,
@@ -1042,6 +1064,25 @@ const PaymentManagement = () => {
           </div>
           
         </CardHeader>
+
+        <div className="mx-4 mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Card className="border-blue-100 bg-blue-50">
+            <CardContent className="pt-6">
+              <p className="text-sm text-blue-700">Total Credit</p>
+              <p className="text-2xl font-bold tabular-nums text-blue-900">
+                {formatCurrency(totalCreditAmount)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-emerald-100 bg-emerald-50">
+            <CardContent className="pt-6">
+              <p className="text-sm text-emerald-700">Total Cheque</p>
+              <p className="text-2xl font-bold tabular-nums text-emerald-900">
+                {formatCurrency(totalChequeAmount)}
+              </p>
+            </CardContent>
+          </Card>
+        </div>
 
         {selectedCustomer !== 'all' && customerOutstanding !== null && (
           <div className="mx-4 mt-4">
