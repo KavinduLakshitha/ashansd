@@ -25,12 +25,13 @@ import {
 import { Line, Bar } from 'react-chartjs-2';
 import axios from '@/lib/api/axios';
 import { useAuth } from '../auth/auth-context';     
-import { AlertCircle, Calendar } from 'lucide-react';
+import { AlertCircle, Calendar as CalendarIcon } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { isAxiosError } from 'axios';
 import { TooltipItem } from 'chart.js';
 import { formatMetricTons } from '@/lib/formatMetricTons';
+import CalendarNotesWidget from '@/components/CalendarNotesWidget';
 
 // Register ChartJS components
 ChartJS.register(
@@ -363,7 +364,8 @@ export default function SalesDashboard() {
   };
 
   return (
-    <Card className="shadow-md h-[calc(100vh-3rem)] flex flex-col">
+    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] gap-4 h-[calc(100vh-3rem)]">
+      <Card className="shadow-md flex flex-col min-h-0 overflow-auto">
       <CardHeader>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
           <div>
@@ -383,7 +385,7 @@ export default function SalesDashboard() {
               </SelectContent>
             </Select>
             <div className="flex items-center space-x-2">
-              <Calendar className="w-4 h-4" />
+              <CalendarIcon className="w-4 h-4" />
               
               {/* Month selection */}
               <Select 
@@ -531,5 +533,10 @@ export default function SalesDashboard() {
         )}
       </CardContent>
     </Card>
+
+      <div className="min-h-[480px] xl:min-h-0 xl:h-full xl:max-w-[300px] overflow-hidden">
+        <CalendarNotesWidget />
+      </div>
+    </div>
   );
 }

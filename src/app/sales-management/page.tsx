@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -54,37 +54,42 @@ export default function SalesManagementPage() {
     setSelectedCustomerId(undefined);
   };
 
-  useEffect(() => {
-    const fetchTotalMetricTons = async () => {
-      if (!user?.currentBusinessLine) {
-        setTotalMetricTons(null);
-        return;
-      }
+  const fetchTotalMetricTons = useCallback(async () => {
+    if (!user?.currentBusinessLine) {
+      setTotalMetricTons(null);
+      return;
+    }
 
-      const saleDate = formatDateForBackend(dateRange.startDate);
+    const saleDate = formatDateForBackend(dateRange.startDate);
+    if (!saleDate) {
+      setTotalMetricTons(null);
+      return;
+    }
 
-      try {
-        const response = await axios.get('/sales/daily-summary', {
-          params: {
-            businessLineId: user.currentBusinessLine,
-            startDate: saleDate,
-            endDate: saleDate,
-          },
-        });
+    try {
+      const response = await axios.get('/sales/daily-summary', {
+        params: {
+          businessLineId: user.currentBusinessLine,
+          startDate: saleDate,
+          endDate: saleDate,
+        },
+      });
 
-        const total = (response.data || []).reduce(
-          (sum: number, row: { totalMetricTons?: number }) => sum + Number(row.totalMetricTons || 0),
-          0
-        );
-        setTotalMetricTons(total);
-      } catch (error) {
-        console.error('Error fetching total metric tons:', error);
-        setTotalMetricTons(null);
-      }
-    };
-
-    fetchTotalMetricTons();
+      const rows = Array.isArray(response.data) ? response.data : [];
+      const total = rows.reduce(
+        (sum: number, row: { totalMetricTons?: number }) => sum + Number(row.totalMetricTons || 0),
+        0
+      );
+      setTotalMetricTons(total);
+    } catch (error) {
+      console.error('Error fetching total metric tons:', error);
+      setTotalMetricTons(null);
+    }
   }, [user?.currentBusinessLine, dateRange.startDate]);
+
+  useEffect(() => {
+    fetchTotalMetricTons();
+  }, [fetchTotalMetricTons]);
 
   return (
     <Card>
@@ -159,6 +164,7 @@ export default function SalesManagementPage() {
           salesPerson={selectedSalesPerson}
           address={address}
           saleDate={formatDateForBackend(dateRange.startDate)}
+          onSaleSuccess={fetchTotalMetricTons}
         />
         </div>
         

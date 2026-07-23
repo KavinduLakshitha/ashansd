@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -48,13 +48,10 @@ export default function PurchaseManagementPage() {
           throw new Error('No authentication token found');
         }        
         
-        const filteredResponse = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/vendors`, {
+        const filteredResponse = await axios.get('/vendors', {
           params: {
             businessLineId: businessLineId
           },
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
         });
         
         setVendors(filteredResponse.data);
@@ -84,38 +81,39 @@ export default function PurchaseManagementPage() {
     fetchVendors();
   }, [getBusinessLineID]);
 
-  useEffect(() => {
-    const fetchTotalMetricTons = async () => {
-      const businessLineId = getBusinessLineID();
-      if (!businessLineId) {
-        setTotalMetricTons(null);
-        return;
-      }
+  const fetchTotalMetricTons = useCallback(async () => {
+    const businessLineId = getBusinessLineID();
+    if (!businessLineId) {
+      setTotalMetricTons(null);
+      return;
+    }
 
-      const purchaseDate = formatDateForBackend(invoiceDate);
+    const purchaseDate = formatDateForBackend(invoiceDate);
 
-      try {
-        const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/purchases/daily-summary`, {
-          params: {
-            businessLineId,
-            startDate: purchaseDate,
-            endDate: purchaseDate,
-          },
-        });
+    try {
+      const response = await axios.get('/purchases/daily-summary', {
+        params: {
+          businessLineId,
+          startDate: purchaseDate,
+          endDate: purchaseDate,
+        },
+      });
 
-        const total = (response.data || []).reduce(
-          (sum: number, row: { totalMetricTons?: number }) => sum + Number(row.totalMetricTons || 0),
-          0
-        );
-        setTotalMetricTons(total);
-      } catch (error) {
-        console.error('Error fetching total metric tons:', error);
-        setTotalMetricTons(null);
-      }
-    };
-
-    fetchTotalMetricTons();
+      const rows = Array.isArray(response.data) ? response.data : [];
+      const total = rows.reduce(
+        (sum: number, row: { totalMetricTons?: number }) => sum + Number(row.totalMetricTons || 0),
+        0
+      );
+      setTotalMetricTons(total);
+    } catch (error) {
+      console.error('Error fetching total metric tons:', error);
+      setTotalMetricTons(null);
+    }
   }, [getBusinessLineID, invoiceDate]);
+
+  useEffect(() => {
+    fetchTotalMetricTons();
+  }, [fetchTotalMetricTons]);
 
   const handleDateChange = (date: Date) => {
     setInvoiceDate(date);
@@ -196,6 +194,7 @@ export default function PurchaseManagementPage() {
             vendorId={selectedVendor} 
             invoiceNumber={invoiceNumber}
             invoiceDate={invoiceDate}
+            onPurchaseSuccess={fetchTotalMetricTons}
           />
         </div>       
     </Card>

@@ -27,6 +27,7 @@ interface InvoiceTableProps {
   salesPerson?: string;
   address?: string;
   saleDate?: string;
+  onSaleSuccess?: () => void;
 }
 
 interface InvoiceRow {
@@ -140,6 +141,7 @@ export default function InvoiceTable({
   customerId,
   salesPersonId,
   saleDate,
+  onSaleSuccess,
 }: InvoiceTableProps) {
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -331,6 +333,7 @@ export default function InvoiceTable({
               title: "Success",
               description: "Sale completed successfully",
             });
+            onSaleSuccess?.();
           }}
           onError={(error) => {
             toast({

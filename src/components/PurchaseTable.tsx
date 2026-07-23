@@ -30,13 +30,15 @@ interface VendorProductsTableProps {
   invoiceNumber?: string;
   invoiceDate?: Date;
   onProductsSelect?: (products: VendorProduct[]) => void;
+  onPurchaseSuccess?: () => void;
 }
 
 const VendorProductsTable: React.FC<VendorProductsTableProps> = ({ 
   vendorId,
   invoiceNumber = '',
   invoiceDate = new Date(),
-  onProductsSelect 
+  onProductsSelect,
+  onPurchaseSuccess,
 }) => {
   const [products, setProducts] = useState<VendorProduct[]>([]);
   const [loading, setLoading] = useState(false);
@@ -267,6 +269,7 @@ const VendorProductsTable: React.FC<VendorProductsTableProps> = ({
           invoiceDate={invoiceDate}
           onSuccess={() => {
             resetForm();
+            onPurchaseSuccess?.();
           }}
           onError={(error) => {
             toast({
