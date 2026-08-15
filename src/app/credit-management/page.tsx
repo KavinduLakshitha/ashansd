@@ -43,6 +43,7 @@ interface Cheque {
   Bank: string;
   RealizeDate: string;
   ReceivedDate?: string | null;
+  DepositedDate?: string | null;
   Amount: number;
   CustomerName: string;
   CustomerID: number;
@@ -169,6 +170,12 @@ interface MarkReceivedDialogState {
   receivedDate: string;
 }
 
+interface MarkDepositedDialogState {
+  isOpen: boolean;
+  cheque: Cheque | null;
+  depositedDate: string;
+}
+
 const PaymentManagement = () => {
   const { user, getBusinessLineID } = useAuth();
   const [pendingPayments, setPendingPayments] = useState<PaymentState>({ 
@@ -213,22 +220,34 @@ const PaymentManagement = () => {
     [pendingPayments.pendingCredits, pendingPayments.pendingOpeningBalances]
   );
 
-  const { awaitingReceiptCheques, floatingCheques } = useMemo(() => {
+  const { awaitingReceiptCheques, inHandCheques, floatingCheques } = useMemo(() => {
     const awaiting: Cheque[] = [];
+    const inHand: Cheque[] = [];
     const floating: Cheque[] = [];
 
     for (const cheque of pendingPayments.pendingCheques) {
-      if (cheque.ReceivedDate) {
+      if (cheque.DepositedDate) {
         floating.push(cheque);
+      } else if (cheque.ReceivedDate) {
+        inHand.push(cheque);
       } else {
         awaiting.push(cheque);
       }
     }
 
-    return { awaitingReceiptCheques: awaiting, floatingCheques: floating };
+    return {
+      awaitingReceiptCheques: awaiting,
+      inHandCheques: inHand,
+      floatingCheques: floating,
+    };
   }, [pendingPayments.pendingCheques]);
 
   const chequeOnHandTotal = useMemo(
+    () => inHandCheques.reduce((sum, cheque) => sum + Number(cheque.Amount || 0), 0),
+    [inHandCheques]
+  );
+
+  const floatingChequeTotal = useMemo(
     () => floatingCheques.reduce((sum, cheque) => sum + Number(cheque.Amount || 0), 0),
     [floatingCheques]
   );
@@ -255,6 +274,16 @@ const PaymentManagement = () => {
     [pendingPayments.pendingCheques]
   );
 
+  // Remaining credit after cash, in-hand cheques, and floating (deposited) cheques.
+  // Settled cash is already excluded from pending credits.
+  const creditBalance = useMemo(() => {
+    const awaitingReceiptTotal = awaitingReceiptCheques.reduce(
+      (sum, cheque) => sum + Number(cheque.Amount || 0),
+      0
+    );
+    return totalCreditAmount + awaitingReceiptTotal;
+  }, [totalCreditAmount, awaitingReceiptCheques]);
+
   // State for confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
     isOpen: false,
@@ -270,6 +299,12 @@ const PaymentManagement = () => {
     chequeNumber: '',
     bank: '',
     receivedDate: format(new Date(), 'yyyy-MM-dd'),
+  });
+
+  const [markDepositedDialog, setMarkDepositedDialog] = useState<MarkDepositedDialogState>({
+    isOpen: false,
+    cheque: null,
+    depositedDate: format(new Date(), 'yyyy-MM-dd'),
   });
 
   const fetchCustomers = useCallback(async () => {
@@ -660,7 +695,7 @@ const PaymentManagement = () => {
       await fetchPendingPayments();
       toast({
         title: 'Success',
-        description: 'Cheque marked as received and moved to floating.',
+        description: 'Cheque marked as received and moved to in hand.',
         duration: 3000,
       });
     } catch (err: unknown) {
@@ -668,6 +703,56 @@ const PaymentManagement = () => {
         err instanceof AxiosError
           ? err.response?.data?.message || 'Error marking cheque as received'
           : 'Error marking cheque as received';
+      setError(`Error: ${errorMessage}`);
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: errorMessage,
+        duration: 3000,
+      });
+    } finally {
+      setProcessingIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(cheque.ChequePaymentID);
+        return newSet;
+      });
+    }
+  };
+
+  const openMarkDepositedDialog = (cheque: Cheque) => {
+    setMarkDepositedDialog({
+      isOpen: true,
+      cheque,
+      depositedDate: format(new Date(), 'yyyy-MM-dd'),
+    });
+  };
+
+  const closeMarkDepositedDialog = () => {
+    setMarkDepositedDialog((prev) => ({ ...prev, isOpen: false, cheque: null }));
+  };
+
+  const handleMarkChequeDeposited = async () => {
+    const { cheque, depositedDate } = markDepositedDialog;
+    if (!cheque) return;
+
+    try {
+      setProcessingIds((prev) => new Set(prev).add(cheque.ChequePaymentID));
+      await axios.put(
+        `${process.env.NEXT_PUBLIC_API_URL}/payments/cheque/${cheque.ChequePaymentID}/deposit`,
+        { depositedDate }
+      );
+      closeMarkDepositedDialog();
+      await fetchPendingPayments();
+      toast({
+        title: 'Success',
+        description: 'Cheque marked as deposited and moved to floating.',
+        duration: 3000,
+      });
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof AxiosError
+          ? err.response?.data?.message || 'Error marking cheque as deposited'
+          : 'Error marking cheque as deposited';
       setError(`Error: ${errorMessage}`);
       toast({
         variant: 'destructive',
@@ -885,24 +970,44 @@ const PaymentManagement = () => {
 
   return (
     <>
-      {floatingCheques.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-50 w-64">
-          <Card className="border-emerald-200 bg-emerald-50 shadow-lg">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-emerald-900">Cheque on Hand</p>
-                <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
-                  {floatingCheques.length}
-                </span>
-              </div>
-              <p className="mt-1 text-2xl font-bold text-emerald-900">
-                {formatCurrency(chequeOnHandTotal)}
-              </p>
-              <p className="mt-1 text-xs text-emerald-700">
-                Cheques received and pending realization
-              </p>
-            </CardContent>
-          </Card>
+      {inHandCheques.length + floatingCheques.length > 0 && (
+        <div className="fixed bottom-6 right-6 z-50 flex w-64 flex-col gap-3">
+          {inHandCheques.length > 0 && (
+            <Card className="border-amber-200 bg-amber-50 shadow-lg">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-amber-900">Cheque in Hand</p>
+                  <span className="rounded-full bg-amber-600 px-2 py-0.5 text-xs font-semibold text-white">
+                    {inHandCheques.length}
+                  </span>
+                </div>
+                <p className="mt-1 text-2xl font-bold text-amber-900">
+                  {formatCurrency(chequeOnHandTotal)}
+                </p>
+                <p className="mt-1 text-xs text-amber-700">
+                  Received but not yet deposited
+                </p>
+              </CardContent>
+            </Card>
+          )}
+          {floatingCheques.length > 0 && (
+            <Card className="border-emerald-200 bg-emerald-50 shadow-lg">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-emerald-900">Floating Cheques</p>
+                  <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
+                    {floatingCheques.length}
+                  </span>
+                </div>
+                <p className="mt-1 text-2xl font-bold text-emerald-900">
+                  {formatCurrency(floatingChequeTotal)}
+                </p>
+                <p className="mt-1 text-xs text-emerald-700">
+                  Deposited and pending realization
+                </p>
+              </CardContent>
+            </Card>
+          )}
         </div>
       )}
       <Card>
@@ -1068,9 +1173,12 @@ const PaymentManagement = () => {
         <div className="mx-4 mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Card className="border-blue-100 bg-blue-50">
             <CardContent className="pt-6">
-              <p className="text-sm text-blue-700">Total Credit</p>
+              <p className="text-sm text-blue-700">Credit Balance</p>
               <p className="text-2xl font-bold tabular-nums text-blue-900">
-                {formatCurrency(totalCreditAmount)}
+                {formatCurrency(creditBalance)}
+              </p>
+              <p className="mt-1 text-xs text-blue-600">
+                After in-hand &amp; floating cheques and cash
               </p>
             </CardContent>
           </Card>
@@ -1197,10 +1305,10 @@ const PaymentManagement = () => {
 
               <div>
                 <h3 className="text-lg font-semibold mb-3">
-                  Floating ({floatingCheques.length})
+                  In hand ({inHandCheques.length})
                 </h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Cheque is in hand and pending bank realization.
+                  Physical cheque received, but not yet deposited at the bank.
                 </p>
                 <Table className="border">
                   <TableHeader className="bg-gray-50">
@@ -1216,13 +1324,94 @@ const PaymentManagement = () => {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                  {floatingCheques.map((cheque) => (
+                  {inHandCheques.map((cheque) => (
                     <TableRow key={cheque.ChequePaymentID}>
                       <TableCell>{cheque.ChequeNumber}</TableCell>
                       <TableCell>{cheque.CustomerName}</TableCell>
                       <TableCell>
                         {cheque.ReceivedDate
                           ? format(new Date(cheque.ReceivedDate), 'yyyy-MM-dd')
+                          : '—'}
+                      </TableCell>
+                      <TableCell>
+                        {format(new Date(cheque.RealizeDate), 'yyyy-MM-dd')}
+                      </TableCell>
+                      <TableCell>{cheque.Bank}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(cheque.Amount)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {formatCurrency(cheque.CreditLimit)}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-center items-center gap-2">
+                          <Button
+                            variant="default"
+                            onClick={() => openMarkDepositedDialog(cheque)}
+                            disabled={processingIds.has(cheque.ChequePaymentID)}
+                            size="sm"
+                          >
+                            {processingIds.has(cheque.ChequePaymentID) ? 'Processing...' : 'Mark deposited'}
+                          </Button>
+                          {user?.userType !== 'management' && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => confirmDeleteChequeRealization(cheque)}
+                            disabled={processingIds.has(cheque.ChequePaymentID)}
+                            className="hover:bg-red-50 hover:text-red-600"
+                            title="Delete Payment & Sale"
+                          >
+                            {processingIds.has(cheque.ChequePaymentID) ? (
+                              <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {inHandCheques.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={8} className="text-center py-4">
+                        No cheques in hand
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+              </div>
+
+              <div>
+                <h3 className="text-lg font-semibold mb-3">
+                  Floating ({floatingCheques.length})
+                </h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Cheque has been deposited and is pending bank realization.
+                </p>
+                <Table className="border">
+                  <TableHeader className="bg-gray-50">
+                    <TableRow>
+                      <TableHead className="text-black w-40 font-bold">Cheque #</TableHead>
+                      <TableHead className="text-black font-bold">Customer</TableHead>
+                      <TableHead className="text-black font-bold">Deposited</TableHead>
+                      <TableHead className="text-black font-bold">Realize Date</TableHead>
+                      <TableHead className="text-black font-bold">Bank</TableHead>
+                      <TableHead className="text-black font-bold text-right">Amount</TableHead>
+                      <TableHead className="text-black font-bold text-right">Credit Limit</TableHead>
+                      <TableHead className="text-black font-bold text-center">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                  {floatingCheques.map((cheque) => (
+                    <TableRow key={cheque.ChequePaymentID}>
+                      <TableCell>{cheque.ChequeNumber}</TableCell>
+                      <TableCell>{cheque.CustomerName}</TableCell>
+                      <TableCell>
+                        {cheque.DepositedDate
+                          ? format(new Date(cheque.DepositedDate), 'yyyy-MM-dd')
                           : '—'}
                       </TableCell>
                       <TableCell>
@@ -1412,7 +1601,7 @@ const PaymentManagement = () => {
           <DialogHeader>
             <DialogTitle>Mark cheque as received</DialogTitle>
             <DialogDescription>
-              Record that the physical cheque is now in hand. It will move to the floating list.
+              Record that the physical cheque is now in hand. Deposit it later to move it to floating.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1456,6 +1645,39 @@ const PaymentManagement = () => {
             </Button>
             <Button onClick={handleMarkChequeReceived}>
               Mark received
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mark Cheque Deposited Dialog */}
+      <Dialog open={markDepositedDialog.isOpen} onOpenChange={(open) => !open && closeMarkDepositedDialog()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Mark cheque as deposited</DialogTitle>
+            <DialogDescription>
+              Record that the cheque has been deposited. It will move to floating until realized or bounced.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label htmlFor="mark-deposited-date">Deposited date</Label>
+              <Input
+                id="mark-deposited-date"
+                type="date"
+                value={markDepositedDialog.depositedDate}
+                onChange={(e) =>
+                  setMarkDepositedDialog((prev) => ({ ...prev, depositedDate: e.target.value }))
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter className="mt-4 gap-2">
+            <Button variant="outline" onClick={closeMarkDepositedDialog}>
+              Cancel
+            </Button>
+            <Button onClick={handleMarkChequeDeposited}>
+              Mark deposited
             </Button>
           </DialogFooter>
         </DialogContent>

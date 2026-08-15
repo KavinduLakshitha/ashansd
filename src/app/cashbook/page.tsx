@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { addDays, format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { useRouter } from "next/navigation";
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -56,11 +56,19 @@ interface CashbookEntry {
   Direction: "IN" | "OUT";
   Amount: number;
   Category: string;
+  ExpenseCategoryID: number | null;
+  ExpenseCategoryName: string | null;
   Description: string | null;
   ReferenceType: string | null;
   ReferenceID: number | null;
   AccountType: "CASH" | "BANK";
   CreatedByName?: string | null;
+}
+
+interface ExpenseCategory {
+  ExpenseCategoryID: number;
+  Name: string;
+  IsPredefined: number | boolean;
 }
 
 interface CashbookSummary {
@@ -71,6 +79,8 @@ interface CashbookSummary {
   bankBalance: number;
   entryCount: number;
 }
+
+const CREATE_NEW_CATEGORY = "__create_new__";
 
 const formatCurrency = (amount: number) =>
   `Rs. ${Number(amount).toLocaleString(undefined, {
@@ -93,9 +103,11 @@ export default function CashbookPage() {
 
   const [entries, setEntries] = useState<CashbookEntry[]>([]);
   const [summary, setSummary] = useState<CashbookSummary | null>(null);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
   const [loading, setLoading] = useState(true);
   const [directionFilter, setDirectionFilter] = useState<string>("all");
   const [accountFilter, setAccountFilter] = useState<string>("all");
+  const [expenseCategoryFilter, setExpenseCategoryFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
     from: addDays(new Date(), -30),
@@ -107,12 +119,17 @@ export default function CashbookPage() {
   const [deleteTarget, setDeleteTarget] = useState<CashbookEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  const [newCategoryOpen, setNewCategoryOpen] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [creatingCategory, setCreatingCategory] = useState(false);
+
   const [form, setForm] = useState({
     entryDate: format(new Date(), "yyyy-MM-dd"),
     direction: "IN" as "IN" | "OUT",
     amount: "",
     accountType: "CASH" as "CASH" | "BANK",
     description: "",
+    expenseCategoryId: "",
   });
 
   useEffect(() => {
@@ -120,6 +137,18 @@ export default function CashbookPage() {
       router.push("/dashboard");
     }
   }, [user, canManage, router]);
+
+  const fetchExpenseCategories = useCallback(async () => {
+    const businessLineId = getBusinessLineID();
+    if (!businessLineId) return [];
+
+    const response = await api.get("/cashbook/expense-categories", {
+      params: { businessLineId },
+    });
+    const data: ExpenseCategory[] = response.data.data || [];
+    setExpenseCategories(data);
+    return data;
+  }, [getBusinessLineID]);
 
   const fetchData = useCallback(async () => {
     const businessLineId = getBusinessLineID();
@@ -132,6 +161,7 @@ export default function CashbookPage() {
       if (dateRange?.to) params.endDate = format(dateRange.to, "yyyy-MM-dd");
       if (directionFilter !== "all") params.direction = directionFilter;
       if (accountFilter !== "all") params.accountType = accountFilter;
+      if (expenseCategoryFilter !== "all") params.expenseCategoryId = expenseCategoryFilter;
       if (search.trim()) params.search = search.trim();
 
       const [entriesRes, summaryRes] = await Promise.all([
@@ -143,6 +173,7 @@ export default function CashbookPage() {
             endDate: params.endDate,
           },
         }),
+        fetchExpenseCategories(),
       ]);
 
       setEntries(entriesRes.data.data || []);
@@ -157,7 +188,16 @@ export default function CashbookPage() {
     } finally {
       setLoading(false);
     }
-  }, [getBusinessLineID, dateRange, directionFilter, accountFilter, search, toast]);
+  }, [
+    getBusinessLineID,
+    dateRange,
+    directionFilter,
+    accountFilter,
+    expenseCategoryFilter,
+    search,
+    toast,
+    fetchExpenseCategories,
+  ]);
 
   useEffect(() => {
     if (canManage) {
@@ -172,8 +212,59 @@ export default function CashbookPage() {
       amount: "",
       accountType: "CASH",
       description: "",
+      expenseCategoryId: "",
     });
     setDialogOpen(true);
+  };
+
+  const handleExpenseCategorySelect = (value: string) => {
+    if (value === CREATE_NEW_CATEGORY) {
+      setNewCategoryName("");
+      setNewCategoryOpen(true);
+      return;
+    }
+    setForm((prev) => ({ ...prev, expenseCategoryId: value }));
+  };
+
+  const handleCreateCategory = async () => {
+    const businessLineId = getBusinessLineID();
+    if (!businessLineId) return;
+
+    const name = newCategoryName.trim();
+    if (!name) {
+      toast({
+        title: "Invalid category",
+        description: "Enter a category name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCreatingCategory(true);
+    try {
+      const response = await api.post("/cashbook/expense-categories", {
+        businessLineId,
+        name,
+      });
+      const created: ExpenseCategory = response.data.data;
+      await fetchExpenseCategories();
+      setForm((prev) => ({
+        ...prev,
+        expenseCategoryId: String(created.ExpenseCategoryID),
+      }));
+      setNewCategoryOpen(false);
+      setNewCategoryName("");
+      toast({ title: "Category added", description: `"${created.Name}" is ready to use.` });
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message?: string }>;
+      toast({
+        title: "Error",
+        description: axiosError.response?.data?.message || "Failed to create category",
+        variant: "destructive",
+      });
+    } finally {
+      setCreatingCategory(false);
+    }
   };
 
   const handleCreate = async () => {
@@ -190,6 +281,15 @@ export default function CashbookPage() {
       return;
     }
 
+    if (form.direction === "OUT" && !form.expenseCategoryId) {
+      toast({
+        title: "Category required",
+        description: "Select an expense category.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       await api.post("/cashbook", {
@@ -200,6 +300,8 @@ export default function CashbookPage() {
         accountType: form.accountType,
         description: form.description || undefined,
         category: form.direction === "IN" ? "MANUAL_INCOME" : "MANUAL_EXPENSE",
+        expenseCategoryId:
+          form.direction === "OUT" ? Number(form.expenseCategoryId) : undefined,
       });
       toast({ title: "Entry added", description: "Manual cashbook entry created." });
       setDialogOpen(false);
@@ -305,7 +407,7 @@ export default function CashbookPage() {
             </Card>
           </div>
 
-          <div className="flex flex-col lg:flex-row gap-3 lg:items-center">
+          <div className="flex flex-col lg:flex-row gap-3 lg:items-center flex-wrap">
             <DatePickerWithRange selected={dateRange} onChange={setDateRange} />
             <Select value={directionFilter} onValueChange={setDirectionFilter}>
               <SelectTrigger className="w-[140px]">
@@ -327,15 +429,25 @@ export default function CashbookPage() {
                 <SelectItem value="BANK">Bank</SelectItem>
               </SelectContent>
             </Select>
+            <Select value={expenseCategoryFilter} onValueChange={setExpenseCategoryFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Expense category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All expense categories</SelectItem>
+                {expenseCategories.map((cat) => (
+                  <SelectItem key={cat.ExpenseCategoryID} value={String(cat.ExpenseCategoryID)}>
+                    {cat.Name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Input
               className="w-full lg:w-64"
               placeholder="Search description..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
-            {/* <Button variant="outline" size="icon" onClick={fetchData} title="Refresh">
-              <RefreshCw className="h-4 w-4" />
-            </Button> */}
           </div>
 
           <div className="rounded-md border">
@@ -344,7 +456,8 @@ export default function CashbookPage() {
                 <TableRow>
                   <TableHead className="font-bold text-black">Date</TableHead>
                   <TableHead className="font-bold text-black">Direction</TableHead>
-                  <TableHead className="font-bold text-black">Category</TableHead>
+                  <TableHead className="font-bold text-black">Type</TableHead>
+                  <TableHead className="font-bold text-black">Expense Category</TableHead>
                   <TableHead className="font-bold text-black">Account</TableHead>
                   <TableHead className="font-bold text-black">Description</TableHead>
                   <TableHead className="font-bold text-black text-right">Amount</TableHead>
@@ -354,13 +467,13 @@ export default function CashbookPage() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-6">
+                    <TableCell colSpan={8} className="text-center py-6">
                       Loading cashbook...
                     </TableCell>
                   </TableRow>
                 ) : entries.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-6 text-muted-foreground">
+                    <TableCell colSpan={8} className="text-center py-6 text-muted-foreground">
                       No cashbook entries for this period
                     </TableCell>
                   </TableRow>
@@ -374,6 +487,7 @@ export default function CashbookPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>{categoryLabel(entry.Category)}</TableCell>
+                      <TableCell>{entry.ExpenseCategoryName || "—"}</TableCell>
                       <TableCell>{entry.AccountType}</TableCell>
                       <TableCell className="max-w-xs truncate">
                         {entry.Description || "—"}
@@ -434,7 +548,11 @@ export default function CashbookPage() {
               <Select
                 value={form.direction}
                 onValueChange={(value) =>
-                  setForm((prev) => ({ ...prev, direction: value as "IN" | "OUT" }))
+                  setForm((prev) => ({
+                    ...prev,
+                    direction: value as "IN" | "OUT",
+                    expenseCategoryId: value === "IN" ? "" : prev.expenseCategoryId,
+                  }))
                 }
               >
                 <SelectTrigger>
@@ -446,6 +564,27 @@ export default function CashbookPage() {
                 </SelectContent>
               </Select>
             </div>
+            {form.direction === "OUT" && (
+              <div>
+                <Label>Expense Category</Label>
+                <Select
+                  value={form.expenseCategoryId || undefined}
+                  onValueChange={handleExpenseCategorySelect}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {expenseCategories.map((cat) => (
+                      <SelectItem key={cat.ExpenseCategoryID} value={String(cat.ExpenseCategoryID)}>
+                        {cat.Name}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={CREATE_NEW_CATEGORY}>+ Create new category</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div>
               <Label>Account</Label>
               <Select
@@ -490,6 +629,45 @@ export default function CashbookPage() {
             </Button>
             <Button onClick={handleCreate} disabled={saving}>
               {saving ? "Saving..." : "Save Entry"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={newCategoryOpen} onOpenChange={setNewCategoryOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>New expense category</DialogTitle>
+            <DialogDescription>
+              Add a custom category for this business line. It will appear in the expense dropdown.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <Label htmlFor="new-cat-name">Name</Label>
+            <Input
+              id="new-cat-name"
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              placeholder="e.g. Packaging"
+              maxLength={100}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleCreateCategory();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setNewCategoryOpen(false)}
+              disabled={creatingCategory}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleCreateCategory} disabled={creatingCategory}>
+              {creatingCategory ? "Creating..." : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>

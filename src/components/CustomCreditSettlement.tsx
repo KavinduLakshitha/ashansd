@@ -48,6 +48,8 @@ interface Cheque {
   ChequeNumber: string;
   Bank: string;
   RealizeDate: string;
+  ReceivedDate?: string | null;
+  DepositedDate?: string | null;
   Amount: number;
 }
 
@@ -69,7 +71,7 @@ interface ChequeEntry {
   bank: string;
   realizeDate: string;
   amount: string;
-  receivedInHand: boolean;
+  chequeStage: 'awaiting' | 'in_hand' | 'floating';
 }
 
 const createEmptyCheque = (): ChequeEntry => ({
@@ -77,7 +79,7 @@ const createEmptyCheque = (): ChequeEntry => ({
   bank: '',
   realizeDate: '',
   amount: '',
-  receivedInHand: true,
+  chequeStage: 'in_hand',
 });
 
 const getTodayDateInputValue = (): string => format(new Date(), 'yyyy-MM-dd');
@@ -440,6 +442,24 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     );
   }, [customerCredits]);
 
+  // Remaining credit after cash, in-hand, and floating (deposited) cheques.
+  // Settled cash is already excluded from pending credits.
+  const creditBalance = useMemo(() => {
+    if (!customerCredits) {
+      return 0;
+    }
+
+    const awaitingReceiptTotal = customerCredits.pendingCheques.reduce(
+      (sum, cheque) =>
+        cheque.ReceivedDate || cheque.DepositedDate
+          ? sum
+          : sum + Number(cheque.Amount || 0),
+      0
+    );
+
+    return totalCreditAmount + awaitingReceiptTotal;
+  }, [customerCredits, totalCreditAmount]);
+
   const hasPendingSettlementItems = Boolean(
     customerCredits &&
       (customerCredits.pendingCredits.length > 0 ||
@@ -522,15 +542,15 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
         return;
       }
 
-      const missingInHandDetails = cheques.some(
-        (cheque) => cheque.receivedInHand && (!cheque.chequeNumber || !cheque.bank)
+      const missingChequeDetails = cheques.some(
+        (cheque) => cheque.chequeStage !== 'awaiting' && (!cheque.chequeNumber || !cheque.bank)
       );
 
-      if (missingInHandDetails) {
+      if (missingChequeDetails) {
         toast({
           variant: "destructive",
           title: "Missing Cheque Details",
-          description: "Cheque number and bank are required when the cheque is already in hand.",
+          description: "Cheque number and bank are required once the cheque is in hand or deposited.",
           duration: 3000,
         });
         return;
@@ -592,7 +612,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           chequeNumber: cheque.chequeNumber,
           bank: cheque.bank,
           realizeDate: cheque.realizeDate,
-          receivedInHand: cheque.receivedInHand,
+          chequeStage: cheque.chequeStage,
           amount: cheques.length > 1
             ? parseFloat(cheque.amount)
             : parseFloat(totalSelectedAmount.toFixed(2)),
@@ -799,18 +819,29 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                   className="w-full"
                 />
               </div>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="settlement-cheque-received"
-                  checked={chequeDetails.receivedInHand}
-                  onCheckedChange={(checked) => setChequeDetails(prev => ({
-                    ...prev,
-                    receivedInHand: checked === true,
-                  }))}
-                />
-                <Label htmlFor="settlement-cheque-received" className="text-sm font-normal">
-                  Cheque received in hand (floating)
-                </Label>
+              <div className="space-y-2">
+                <Label>Cheque status</Label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  {([
+                    { value: 'awaiting', label: 'Awaiting receipt' },
+                    { value: 'in_hand', label: 'In hand' },
+                    { value: 'floating', label: 'Deposited (floating)' },
+                  ] as const).map((option) => (
+                    <label key={option.value} className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="settlement-cheque-stage"
+                        value={option.value}
+                        checked={chequeDetails.chequeStage === option.value}
+                        onChange={() => setChequeDetails((prev) => ({
+                          ...prev,
+                          chequeStage: option.value,
+                        }))}
+                      />
+                      <span className="text-sm">{option.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
               {cheques.slice(1).map((cheque, index) => (
                 <div key={index + 1} className="space-y-3 border rounded p-3">
@@ -873,17 +904,28 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                       />
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Checkbox
-                      id={`settlement-cheque-received-${index + 1}`}
-                      checked={cheque.receivedInHand}
-                      onCheckedChange={(checked) => setCheques((prev) => prev.map((item, itemIndex) =>
-                        itemIndex === index + 1 ? { ...item, receivedInHand: checked === true } : item
+                  <div className="space-y-2">
+                    <Label>Cheque status</Label>
+                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                      {([
+                        { value: 'awaiting', label: 'Awaiting receipt' },
+                        { value: 'in_hand', label: 'In hand' },
+                        { value: 'floating', label: 'Deposited (floating)' },
+                      ] as const).map((option) => (
+                        <label key={option.value} className="flex items-center space-x-2">
+                          <input
+                            type="radio"
+                            name={`settlement-cheque-stage-${index + 1}`}
+                            value={option.value}
+                            checked={cheque.chequeStage === option.value}
+                            onChange={() => setCheques((prev) => prev.map((item, itemIndex) =>
+                              itemIndex === index + 1 ? { ...item, chequeStage: option.value } : item
+                            ))}
+                          />
+                          <span className="text-sm">{option.label}</span>
+                        </label>
                       ))}
-                    />
-                    <Label htmlFor={`settlement-cheque-received-${index + 1}`} className="text-sm font-normal">
-                      Cheque received in hand (floating)
-                    </Label>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -915,9 +957,12 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
               <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="rounded-md border border-blue-100 bg-blue-50 p-4">
-                    <p className="text-sm text-blue-700">Total Credit</p>
+                    <p className="text-sm text-blue-700">Credit Balance</p>
                     <p className="text-2xl font-bold tabular-nums text-blue-900">
-                      {formatCurrency(totalCreditAmount)}
+                      {formatCurrency(creditBalance)}
+                    </p>
+                    <p className="mt-1 text-xs text-blue-600">
+                      After in-hand &amp; floating cheques and cash
                     </p>
                   </div>
                   <div className="rounded-md border border-emerald-100 bg-emerald-50 p-4">
@@ -1179,7 +1224,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                 !paymentDate ||
                 (paymentMethod === 'CHEQUE' &&
                   (!chequeDetails.realizeDate ||
-                    (chequeDetails.receivedInHand &&
+                    (chequeDetails.chequeStage !== 'awaiting' &&
                       (!chequeDetails.chequeNumber || !chequeDetails.bank))))
               }
               className="mt-2"

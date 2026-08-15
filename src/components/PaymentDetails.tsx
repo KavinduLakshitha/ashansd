@@ -492,7 +492,7 @@ interface ChequeDetails {
   chequeNumber: string;
   realizeDate: Date | null;
   bank: string;
-  receivedInHand: boolean;
+  chequeStage: 'awaiting' | 'in_hand' | 'floating';
 }
 
 interface PaymentDetailsProps {
@@ -587,7 +587,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
         return true;
       }
 
-      if (cheque.receivedInHand) {
+      if (cheque.chequeStage !== 'awaiting') {
         return !cheque.chequeNumber || !cheque.bank;
       }
 
@@ -652,7 +652,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
       chequeNumber: '',
       realizeDate: null,
       bank: '',
-      receivedInHand: true,
+      chequeStage: 'in_hand',
     };
     
     setCheques([...cheques, newCheque]);
@@ -683,8 +683,8 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
       return;
     } else if (field === 'realizeDate') {
       updatedCheques[index][field] = value as Date | null;
-    } else if (field === 'receivedInHand') {
-      updatedCheques[index][field] = value as boolean;
+    } else if (field === 'chequeStage') {
+      updatedCheques[index][field] = value as ChequeDetails['chequeStage'];
     } else {
       updatedCheques[index][field] = value as string;
     }
@@ -730,7 +730,7 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
         chequeNumber: cheque.chequeNumber,
         realizeDate: cheque.realizeDate,
         bank: cheque.bank,
-        receivedInHand: cheque.receivedInHand,
+        chequeStage: cheque.chequeStage,
       }));
   
       const response = await axios.post(
@@ -916,17 +916,25 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
                 onChange={(e) => updateCheque(index, 'bank', e.target.value)}
               />
               <div></div>
-              <div className="col-span-3 flex items-center gap-2">
-                <Checkbox
-                  id={`cheque-received-${index}`}
-                  checked={cheque.receivedInHand}
-                  onCheckedChange={(checked) =>
-                    updateCheque(index, 'receivedInHand', checked === true)
-                  }
-                />
-                <Label htmlFor={`cheque-received-${index}`} className="text-xs font-normal">
-                  Cheque received in hand. Uncheck if awaiting receipt from customer.
-                </Label>
+              <div className="col-span-3 space-y-1">
+                <Label className="text-xs">Cheque status</Label>
+                <div className="flex flex-wrap gap-3">
+                  {([
+                    { value: 'awaiting', label: 'Awaiting receipt' },
+                    { value: 'in_hand', label: 'In hand' },
+                    { value: 'floating', label: 'Deposited (floating)' },
+                  ] as const).map((option) => (
+                    <label key={option.value} className="flex items-center gap-1.5">
+                      <input
+                        type="radio"
+                        name={`cheque-stage-${index}`}
+                        checked={cheque.chequeStage === option.value}
+                        onChange={() => updateCheque(index, 'chequeStage', option.value)}
+                      />
+                      <span className="text-xs">{option.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
             </React.Fragment>
           ))}
