@@ -32,6 +32,7 @@ import { isAxiosError } from 'axios';
 import { TooltipItem } from 'chart.js';
 import { formatMetricTons } from '@/lib/formatMetricTons';
 import CalendarNotesWidget from '@/components/CalendarNotesWidget';
+import { format } from 'date-fns';
 
 // Register ChartJS components
 ChartJS.register(
@@ -150,12 +151,13 @@ export default function SalesDashboard() {
 
   useEffect(() => {
 
-    const getDateRange = (): { startDate: Date, endDate: Date } => {
+    const getDateRange = (): { startDate: string; endDate: string } => {
       const startDate = new Date(selectedYear, selectedMonth, 1);
       const endDate = new Date(selectedYear, selectedMonth + 1, 0);
-      endDate.setHours(23, 59, 59, 999);
-      
-      return { startDate, endDate };
+      return {
+        startDate: format(startDate, 'yyyy-MM-dd'),
+        endDate: format(endDate, 'yyyy-MM-dd'),
+      };
     };
 
     const fetchSalesData = async () => {
@@ -173,8 +175,8 @@ export default function SalesDashboard() {
         const response = await axios.get(endpoint, {
           params: {
             businessLineId: user.currentBusinessLine,
-            startDate: startDate.toISOString().split('T')[0],
-            endDate: endDate.toISOString().split('T')[0]
+            startDate,
+            endDate,
           }
         });
   

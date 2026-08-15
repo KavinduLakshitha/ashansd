@@ -80,6 +80,8 @@ const createEmptyCheque = (): ChequeEntry => ({
   receivedInHand: true,
 });
 
+const getTodayDateInputValue = (): string => format(new Date(), 'yyyy-MM-dd');
+
 const formatCurrency = (amount: number) =>
   `Rs. ${Number(amount).toLocaleString(undefined, {
     minimumFractionDigits: 2,
@@ -120,6 +122,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [paymentDate, setPaymentDate] = useState(getTodayDateInputValue);
   const [cheques, setCheques] = useState<ChequeEntry[]>([createEmptyCheque()]);
   const chequeDetails = cheques[0] ?? createEmptyCheque();
   const setChequeDetails = (updater: ChequeEntry | ((prev: ChequeEntry) => ChequeEntry)) => {
@@ -142,6 +145,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       setCustomerCredits(null);
       setError("");
       setPaymentMethod('CASH');
+      setPaymentDate(getTodayDateInputValue());
       setCheques([createEmptyCheque()]);
       setSelectedItems([]);
       setTotalPaymentAmount("");
@@ -495,6 +499,16 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       return;
     }
 
+    if (!paymentDate) {
+      toast({
+        variant: "destructive",
+        title: "Missing Payment Date",
+        description: "Please select a payment date.",
+        duration: 3000,
+      });
+      return;
+    }
+
     if (paymentMethod === 'CHEQUE') {
       const hasInvalidCheque = cheques.some((cheque) => !cheque.realizeDate);
 
@@ -559,6 +573,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
     const requestData = {
       amount: parseFloat(totalSelectedAmount.toFixed(2)),
       paymentMethod,
+      settledDate: paymentDate,
       selectedItems: selectedItems.map((item) =>
         item.type === 'credit'
           ? {
@@ -695,29 +710,41 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
-          <Label>Payment Method</Label>
-          <div className="flex space-x-4">
-            <label className="flex items-center space-x-2">
-              <input
-                type="radio"
-                value="CASH"
-                checked={paymentMethod === 'CASH'}
-                onChange={(e) => setPaymentMethod(e.target.value)}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-3">
+              <Label>Payment Method</Label>
+              <div className="flex space-x-4">
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    value="CASH"
+                    checked={paymentMethod === 'CASH'}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                  />
+                  <span>Cash</span>
+                </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    value="CHEQUE"
+                    checked={paymentMethod === 'CHEQUE'}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                  />
+                  <span>Cheque</span>
+                </label>
+              </div>
+            </div>
+            <div className="space-y-3">
+              <Label htmlFor="payment-date">Payment Date</Label>
+              <Input
+                id="payment-date"
+                type="date"
+                value={paymentDate}
+                onChange={(e) => setPaymentDate(e.target.value)}
+                className="w-full"
               />
-              <span>Cash</span>
-            </label>
-            <label className="flex items-center space-x-2">
-              <input
-                type="radio"
-                value="CHEQUE"
-                checked={paymentMethod === 'CHEQUE'}
-                onChange={(e) => setPaymentMethod(e.target.value)}
-              />
-              <span>Cheque</span>
-            </label>
+            </div>
           </div>
-        </div>
 
         {/* Cheque details - show only when CHEQUE is selected */}
         {paymentMethod === 'CHEQUE' && (
@@ -1149,6 +1176,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                 selectedItems.length === 0 ||
                 hasInvalidSelection ||
                 totalSelectedAmount <= 0 ||
+                !paymentDate ||
                 (paymentMethod === 'CHEQUE' &&
                   (!chequeDetails.realizeDate ||
                     (chequeDetails.receivedInHand &&
@@ -1169,7 +1197,8 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
             <DialogTitle>Confirm Payment</DialogTitle>
             <DialogDescription>
               You are about to settle {formatCurrency(totalSelectedAmount)} 
-              {customerCredits && ` for ${customerCredits.customerDetails.CusName}`}.
+              {customerCredits && ` for ${customerCredits.customerDetails.CusName}`}
+              {paymentDate ? ` on ${paymentDate}` : ''}.
               Items will be settled in the exact order they were selected.
             </DialogDescription>
           </DialogHeader>
