@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -97,6 +97,60 @@ const monthNames = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
+
+function StatCard({
+  label,
+  value,
+  isLoading,
+}: {
+  label: string;
+  value: string | number;
+  isLoading: boolean;
+}) {
+  const valueRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const el = valueRef.current;
+    if (!el || isLoading) return;
+
+    const fitToWidth = () => {
+      const maxSize = 24;
+      const minSize = 11;
+      let size = maxSize;
+      el.style.fontSize = `${size}px`;
+      while (el.scrollWidth > el.clientWidth && size > minSize) {
+        size -= 0.5;
+        el.style.fontSize = `${size}px`;
+      }
+    };
+
+    fitToWidth();
+    const observer = new ResizeObserver(fitToWidth);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [value, isLoading]);
+
+  return (
+    <Card className="min-w-0 overflow-hidden">
+      <CardContent className="p-3 sm:p-4">
+        <div className="text-xs sm:text-sm text-muted-foreground truncate" title={label}>
+          {label}
+        </div>
+        {isLoading ? (
+          <Skeleton className="h-7 w-24 mt-1" />
+        ) : (
+          <div
+            ref={valueRef}
+            className="mt-1 w-full min-h-7 font-bold tabular-nums tracking-tight leading-none whitespace-nowrap overflow-hidden"
+            title={String(value)}
+          >
+            {value}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function SalesDashboard() {
   const [, setSalesData] = useState<SaleData[]>([]);
@@ -366,19 +420,19 @@ export default function SalesDashboard() {
   };
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] gap-4 h-[calc(100vh-3rem)]">
-      <Card className="shadow-md flex flex-col min-h-0 overflow-auto">
-      <CardHeader>
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center">
-          <div>
+    <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(240px,280px)] gap-4 min-h-0 xl:h-[calc(100dvh-3.5rem)]">
+      <Card className="shadow-md flex flex-col min-w-0 min-h-0 overflow-auto">
+      <CardHeader className="p-4 sm:p-6">
+        <div className="flex flex-col gap-3 lg:flex-row lg:justify-between lg:items-start">
+          <div className="min-w-0">
             <CardTitle>{overviewMode === 'sales' ? 'Sales Overview' : 'Purchase Overview'}</CardTitle>
             <CardDescription>
               {overviewMode === 'sales' ? 'Sales performance analysis' : 'Purchase performance analysis'}
             </CardDescription>
           </div>
-          <div className="mt-2 md:mt-0 flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={overviewMode} onValueChange={(value) => setOverviewMode(value as 'sales' | 'purchases')}>
-              <SelectTrigger className="w-[140px]">
+              <SelectTrigger className="w-[120px] sm:w-[140px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -386,15 +440,15 @@ export default function SalesDashboard() {
                 <SelectItem value="purchases">Purchases</SelectItem>
               </SelectContent>
             </Select>
-            <div className="flex items-center space-x-2">
-              <CalendarIcon className="w-4 h-4" />
+            <div className="flex flex-wrap items-center gap-2">
+              <CalendarIcon className="w-4 h-4 shrink-0" />
               
               {/* Month selection */}
               <Select 
                 value={selectedMonth.toString()} 
                 onValueChange={(value) => setSelectedMonth(parseInt(value))}
               >
-                <SelectTrigger className="w-[140px]">
+                <SelectTrigger className="w-[120px] sm:w-[140px]">
                   <SelectValue placeholder="Select month" />
                 </SelectTrigger>
                 <SelectContent>
@@ -411,7 +465,7 @@ export default function SalesDashboard() {
                 value={selectedYear.toString()} 
                 onValueChange={(value) => setSelectedYear(parseInt(value))}
               >
-                <SelectTrigger className="w-[100px]">
+                <SelectTrigger className="w-[90px] sm:w-[100px]">
                   <SelectValue placeholder="Select year" />
                 </SelectTrigger>
                 <SelectContent>
@@ -434,66 +488,37 @@ export default function SalesDashboard() {
           </Alert>
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-6">
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-sm text-muted-foreground">
-                    {overviewMode === 'sales' ? 'Total Sales' : 'Total Purchases'}
-                  </div>
-                  {isLoading ? (
-                    <Skeleton className="h-7 w-24 mt-1" />
-                  ) : (
-                    <div className="text-2xl font-bold">{formatCurrency(totalSales)}</div>
-                  )}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-sm text-muted-foreground">Total Metric Tons</div>
-                  {isLoading ? (
-                    <Skeleton className="h-7 w-24 mt-1" />
-                  ) : (
-                    <div className="text-2xl font-bold">{formatMetricTons(totalMetricTons)}</div>
-                  )}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-sm text-muted-foreground">
-                    {overviewMode === 'sales' ? 'Total Orders' : 'Total Purchase Orders'}
-                  </div>
-                  {isLoading ? (
-                    <Skeleton className="h-7 w-24 mt-1" />
-                  ) : (
-                    <div className="text-2xl font-bold">{totalOrders}</div>
-                  )}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-sm text-muted-foreground">Total Outstanding Credit</div>
-                  {totalOutstandingCredit === null ? (
-                    <Skeleton className="h-7 w-24 mt-1" />
-                  ) : (
-                    <div className="text-2xl font-bold">{formatCurrency(totalOutstandingCredit)}</div>
-                  )}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardContent className="pt-6">
-                  <div className="text-sm text-muted-foreground">Bank Balance</div>
-                  {bankBalance === null ? (
-                    <Skeleton className="h-7 w-24 mt-1" />
-                  ) : (
-                    <div className="text-2xl font-bold">{formatCurrency(bankBalance)}</div>
-                  )}
-                </CardContent>
-              </Card>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,11.5rem),1fr))] gap-3 mb-6">
+              <StatCard
+                label={overviewMode === 'sales' ? 'Total Sales' : 'Total Purchases'}
+                value={formatCurrency(totalSales)}
+                isLoading={isLoading}
+              />
+              <StatCard
+                label="Total Metric Tons"
+                value={formatMetricTons(totalMetricTons)}
+                isLoading={isLoading}
+              />
+              <StatCard
+                label={overviewMode === 'sales' ? 'Total Orders' : 'Total Purchase Orders'}
+                value={totalOrders}
+                isLoading={isLoading}
+              />
+              <StatCard
+                label="Total Outstanding Credit"
+                value={formatCurrency(totalOutstandingCredit ?? 0)}
+                isLoading={totalOutstandingCredit === null}
+              />
+              <StatCard
+                label="Bank Balance"
+                value={formatCurrency(bankBalance ?? 0)}
+                isLoading={bankBalance === null}
+              />
             </div>
 
-            <Tabs defaultValue="line" value={activeTab} onValueChange={(value) => setActiveTab(value as ChartType)} className="flex-1 flex flex-col">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-medium">
+            <Tabs defaultValue="line" value={activeTab} onValueChange={(value) => setActiveTab(value as ChartType)} className="flex-1 flex flex-col min-w-0">
+              <div className="flex flex-wrap justify-between items-center gap-2 mb-4">
+                <h3 className="text-base sm:text-lg font-medium min-w-0">
                   {monthNames[selectedMonth]} {selectedYear} {overviewMode === 'sales' ? 'Sales' : 'Purchase'} Trend
                 </h3>
                 <TabsList>
@@ -536,7 +561,7 @@ export default function SalesDashboard() {
       </CardContent>
     </Card>
 
-      <div className="min-h-[480px] xl:min-h-0 xl:h-full xl:max-w-[300px] overflow-hidden">
+      <div className="min-h-[420px] xl:min-h-0 xl:h-full xl:max-w-[280px] min-w-0 overflow-hidden">
         <CalendarNotesWidget />
       </div>
     </div>
