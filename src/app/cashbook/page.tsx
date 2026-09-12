@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { addDays, format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { useRouter } from "next/navigation";
-import { Download, Eraser, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArrowLeftRight, Download, Eraser, Pencil, Plus, Trash2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -147,6 +147,8 @@ export default function CashbookPage() {
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<CashbookEntry | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -179,6 +181,9 @@ export default function CashbookPage() {
   const [loadingDirectory, setLoadingDirectory] = useState(false);
   const [creatingBank, setCreatingBank] = useState(false);
   const [selectNewBankAfterCreate, setSelectNewBankAfterCreate] = useState(false);
+  const [selectNewBankForTransfer, setSelectNewBankForTransfer] = useState<
+    null | "from" | "to"
+  >(null);
 
   const [editBankTarget, setEditBankTarget] = useState<BankAccount | null>(null);
   const [editBankForm, setEditBankForm] = useState({ name: "", accountNumber: "" });
@@ -194,6 +199,15 @@ export default function CashbookPage() {
     bankAccountId: "",
     description: "",
     expenseCategoryId: "",
+  });
+
+  const [transferForm, setTransferForm] = useState({
+    entryDate: format(new Date(), "yyyy-MM-dd"),
+    transferType: "CASH_TO_BANK" as "CASH_TO_BANK" | "BANK_TO_BANK",
+    amount: "",
+    fromBankAccountId: "",
+    toBankAccountId: "",
+    description: "",
   });
 
   useEffect(() => {
@@ -304,8 +318,24 @@ export default function CashbookPage() {
     setDialogOpen(true);
   };
 
-  const openNewBankDialog = async (selectAfterCreate = false) => {
+  const openTransferDialog = () => {
+    setTransferForm({
+      entryDate: format(new Date(), "yyyy-MM-dd"),
+      transferType: "CASH_TO_BANK",
+      amount: "",
+      fromBankAccountId: "",
+      toBankAccountId: "",
+      description: "",
+    });
+    setTransferOpen(true);
+  };
+
+  const openNewBankDialog = async (
+    selectAfterCreate = false,
+    transferField: null | "from" | "to" = null
+  ) => {
     setSelectNewBankAfterCreate(selectAfterCreate);
+    setSelectNewBankForTransfer(transferField);
     setNewBankForm({ name: "", bankCode: "", branchCode: "", accountNumber: "" });
     setNewBankOpen(true);
 
@@ -477,10 +507,24 @@ export default function CashbookPage() {
           accountType: "BANK",
           bankAccountId: String(created.BankAccountID),
         }));
+      } else if (selectNewBankForTransfer === "from") {
+        setTransferForm((prev) => ({
+          ...prev,
+          fromBankAccountId: String(created.BankAccountID),
+        }));
+      } else if (selectNewBankForTransfer === "to") {
+        setTransferForm((prev) => ({
+          ...prev,
+          toBankAccountId: String(created.BankAccountID),
+        }));
       }
       setNewBankOpen(false);
       setNewBankForm({ name: "", bankCode: "", branchCode: "", accountNumber: "" });
       setSelectNewBankAfterCreate(false);
+      setSelectNewBankForTransfer(null);
+      if (!selectNewBankAfterCreate && !selectNewBankForTransfer) {
+        setManageBanksOpen(true);
+      }
       toast({
         title: "Bank account added",
         description: `"${created.Name}" is ready to use.`,
@@ -523,6 +567,7 @@ export default function CashbookPage() {
         description: `"${name}" saved.`,
       });
       setEditBankTarget(null);
+      setManageBanksOpen(true);
       await fetchBankAccounts();
       await fetchData();
     } catch (error) {
@@ -557,6 +602,7 @@ export default function CashbookPage() {
         setBankAccountFilter("all");
       }
       setDeleteBankTarget(null);
+      setManageBanksOpen(true);
       await fetchBankAccounts();
       await fetchData();
     } catch (error) {
@@ -633,12 +679,94 @@ export default function CashbookPage() {
     }
   };
 
+  const handleTransfer = async () => {
+    const businessLineId = getBusinessLineID();
+    if (!businessLineId) return;
+
+    const amount = parseFloat(transferForm.amount);
+    if (!transferForm.entryDate || !(amount > 0)) {
+      toast({
+        title: "Invalid transfer",
+        description: "Enter a valid date and amount greater than zero.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!transferForm.toBankAccountId) {
+      toast({
+        title: "Destination required",
+        description: "Select the destination bank account.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (transferForm.transferType === "BANK_TO_BANK") {
+      if (!transferForm.fromBankAccountId) {
+        toast({
+          title: "Source required",
+          description: "Select the source bank account.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (transferForm.fromBankAccountId === transferForm.toBankAccountId) {
+        toast({
+          title: "Invalid accounts",
+          description: "Source and destination bank accounts must be different.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    setTransferring(true);
+    try {
+      await api.post("/cashbook/transfer", {
+        businessLineId,
+        entryDate: transferForm.entryDate,
+        amount,
+        transferType: transferForm.transferType,
+        fromBankAccountId:
+          transferForm.transferType === "BANK_TO_BANK"
+            ? Number(transferForm.fromBankAccountId)
+            : undefined,
+        toBankAccountId: Number(transferForm.toBankAccountId),
+        description: transferForm.description || undefined,
+      });
+      toast({
+        title: "Transfer recorded",
+        description:
+          transferForm.transferType === "CASH_TO_BANK"
+            ? "Cash moved to bank account."
+            : "Funds moved between bank accounts.",
+      });
+      setTransferOpen(false);
+      await fetchData();
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message?: string }>;
+      toast({
+        title: "Error",
+        description: axiosError.response?.data?.message || "Failed to record transfer",
+        variant: "destructive",
+      });
+    } finally {
+      setTransferring(false);
+    }
+  };
+
   const handleDelete = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
     try {
       await api.delete(`/cashbook/${deleteTarget.EntryID}`);
-      toast({ title: "Deleted", description: "Manual entry removed." });
+      toast({
+        title: "Deleted",
+        description: isTransferEntry(deleteTarget)
+          ? "Transfer removed from both accounts."
+          : "Manual entry removed.",
+      });
       setDeleteTarget(null);
       await fetchData();
     } catch (error) {
@@ -887,10 +1015,19 @@ export default function CashbookPage() {
     }
   };
 
-  const isManual = (entry: CashbookEntry) =>
+  const isDeletable = (entry: CashbookEntry) =>
     entry.ReferenceType === "MANUAL" ||
+    entry.ReferenceType === "TRANSFER" ||
     entry.Category === "MANUAL_INCOME" ||
-    entry.Category === "MANUAL_EXPENSE";
+    entry.Category === "MANUAL_EXPENSE" ||
+    entry.Category === "TRANSFER_OUT" ||
+    entry.Category === "TRANSFER_IN";
+
+  const isTransferEntry = (entry: CashbookEntry | null) =>
+    !!entry &&
+    (entry.ReferenceType === "TRANSFER" ||
+      entry.Category === "TRANSFER_OUT" ||
+      entry.Category === "TRANSFER_IN");
 
   if (!canManage) {
     return null;
@@ -915,6 +1052,10 @@ export default function CashbookPage() {
             )}
             <Button variant="outline" size="sm" onClick={openManageBanksDialog}>
               Bank Accounts
+            </Button>
+            <Button variant="outline" size="sm" onClick={openTransferDialog}>
+              <ArrowLeftRight className="h-4 w-4 mr-1" />
+              Transfer
             </Button>
             <Button variant="outline" size="sm" onClick={() => openCreateDialog("OUT")}>
               Add Expense
@@ -1118,7 +1259,7 @@ export default function CashbookPage() {
                         {formatCurrency(Number(entry.Amount))}
                       </TableCell>
                       <TableCell className="text-center">
-                        {isManual(entry) ? (
+                        {isDeletable(entry) ? (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1284,6 +1425,170 @@ export default function CashbookPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={transferOpen}
+        onOpenChange={(open) => {
+          if (!open && (newBankOpen || creatingBank)) {
+            return;
+          }
+          setTransferOpen(open);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Transfer funds</DialogTitle>
+            <DialogDescription>
+              Move money from cash to a bank account, or between two bank accounts. This does not count as income or expense.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="tr-date">Date</Label>
+              <Input
+                id="tr-date"
+                type="date"
+                value={transferForm.entryDate}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({ ...prev, entryDate: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <Label>Transfer type</Label>
+              <Select
+                value={transferForm.transferType}
+                onValueChange={(value) =>
+                  setTransferForm((prev) => ({
+                    ...prev,
+                    transferType: value as "CASH_TO_BANK" | "BANK_TO_BANK",
+                    fromBankAccountId:
+                      value === "CASH_TO_BANK" ? "" : prev.fromBankAccountId,
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CASH_TO_BANK">Cash → Bank</SelectItem>
+                  <SelectItem value="BANK_TO_BANK">Bank → Bank</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {transferForm.transferType === "BANK_TO_BANK" && (
+              <div>
+                <Label>From bank account</Label>
+                <Select
+                  value={transferForm.fromBankAccountId || undefined}
+                  onValueChange={(value) => {
+                    if (value === CREATE_NEW_BANK_ACCOUNT) {
+                      openNewBankDialog(false, "from");
+                      return;
+                    }
+                    setTransferForm((prev) => ({ ...prev, fromBankAccountId: value }));
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select source account" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {bankAccounts.map((account) => (
+                      <SelectItem
+                        key={account.BankAccountID}
+                        value={String(account.BankAccountID)}
+                      >
+                        {account.Name}
+                        {account.BankName ? ` (${account.BankName}` : ""}
+                        {account.BranchName ? ` — ${account.BranchName}` : ""}
+                        {account.BankName ? ")" : ""}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={CREATE_NEW_BANK_ACCOUNT}>
+                      + Create new bank account
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            <div>
+              <Label>To bank account</Label>
+              <Select
+                value={transferForm.toBankAccountId || undefined}
+                onValueChange={(value) => {
+                  if (value === CREATE_NEW_BANK_ACCOUNT) {
+                    openNewBankDialog(false, "to");
+                    return;
+                  }
+                  setTransferForm((prev) => ({ ...prev, toBankAccountId: value }));
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select destination account" />
+                </SelectTrigger>
+                <SelectContent>
+                  {bankAccounts
+                    .filter(
+                      (account) =>
+                        transferForm.transferType !== "BANK_TO_BANK" ||
+                        String(account.BankAccountID) !== transferForm.fromBankAccountId
+                    )
+                    .map((account) => (
+                      <SelectItem
+                        key={account.BankAccountID}
+                        value={String(account.BankAccountID)}
+                      >
+                        {account.Name}
+                        {account.BankName ? ` (${account.BankName}` : ""}
+                        {account.BranchName ? ` — ${account.BranchName}` : ""}
+                        {account.BankName ? ")" : ""}
+                      </SelectItem>
+                    ))}
+                  <SelectItem value={CREATE_NEW_BANK_ACCOUNT}>
+                    + Create new bank account
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="tr-amount">Amount (Rs.)</Label>
+              <Input
+                id="tr-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                value={transferForm.amount}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({ ...prev, amount: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <Label htmlFor="tr-desc">Description</Label>
+              <Input
+                id="tr-desc"
+                value={transferForm.description}
+                onChange={(e) =>
+                  setTransferForm((prev) => ({ ...prev, description: e.target.value }))
+                }
+                placeholder="Optional note"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setTransferOpen(false)}
+              disabled={transferring}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleTransfer} disabled={transferring}>
+              {transferring ? "Transferring..." : "Record Transfer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={newCategoryOpen} onOpenChange={setNewCategoryOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
@@ -1323,7 +1628,20 @@ export default function CashbookPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={manageBanksOpen} onOpenChange={setManageBanksOpen}>
+      <Dialog
+        open={manageBanksOpen}
+        onOpenChange={(open) => {
+          // Nested create/edit/delete dialogs briefly unmount pointer-events on the
+          // parent Dialog; ignore those close events so the list stays open.
+          if (
+            !open &&
+            (newBankOpen || editBankTarget || deleteBankTarget || creatingBank || savingBankEdit || deletingBank)
+          ) {
+            return;
+          }
+          setManageBanksOpen(open);
+        }}
+      >
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Bank accounts</DialogTitle>
@@ -1409,7 +1727,10 @@ export default function CashbookPage() {
         open={newBankOpen}
         onOpenChange={(open) => {
           setNewBankOpen(open);
-          if (!open) setSelectNewBankAfterCreate(false);
+          if (!open) {
+            setSelectNewBankAfterCreate(false);
+            setSelectNewBankForTransfer(null);
+          }
         }}
       >
         <DialogContent className="sm:max-w-md overflow-visible">
@@ -1591,7 +1912,13 @@ export default function CashbookPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deletingBank}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteBankAccount} disabled={deletingBank}>
+            <AlertDialogAction
+              disabled={deletingBank}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDeleteBankAccount();
+              }}
+            >
               {deletingBank ? "Deleting..." : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -1601,10 +1928,21 @@ export default function CashbookPage() {
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete manual entry?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isTransferEntry(deleteTarget) ? "Delete transfer?" : "Delete manual entry?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently remove the selected cashbook entry
-              {deleteTarget ? ` (${formatCurrency(Number(deleteTarget.Amount))})` : ""}.
+              {isTransferEntry(deleteTarget)
+                ? `This will remove both sides of the transfer${
+                    deleteTarget
+                      ? ` (${formatCurrency(Number(deleteTarget.Amount))})`
+                      : ""
+                  }.`
+                : `This will permanently remove the selected cashbook entry${
+                    deleteTarget
+                      ? ` (${formatCurrency(Number(deleteTarget.Amount))})`
+                      : ""
+                  }.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

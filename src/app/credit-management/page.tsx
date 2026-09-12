@@ -59,6 +59,7 @@ interface Credit {
   CustomerID: number;
   CreditLimit: number;
   SaleID: number;
+  SaleDate?: string;
 }
 
 interface OpeningBalance {
@@ -970,46 +971,6 @@ const PaymentManagement = () => {
 
   return (
     <>
-      {inHandCheques.length + floatingCheques.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-50 flex w-64 flex-col gap-3">
-          {inHandCheques.length > 0 && (
-            <Card className="border-amber-200 bg-amber-50 shadow-lg">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-amber-900">Cheque in Hand</p>
-                  <span className="rounded-full bg-amber-600 px-2 py-0.5 text-xs font-semibold text-white">
-                    {inHandCheques.length}
-                  </span>
-                </div>
-                <p className="mt-1 text-2xl font-bold text-amber-900">
-                  {formatCurrency(chequeOnHandTotal)}
-                </p>
-                <p className="mt-1 text-xs text-amber-700">
-                  Received but not yet deposited
-                </p>
-              </CardContent>
-            </Card>
-          )}
-          {floatingCheques.length > 0 && (
-            <Card className="border-emerald-200 bg-emerald-50 shadow-lg">
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-emerald-900">Floating Cheques</p>
-                  <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
-                    {floatingCheques.length}
-                  </span>
-                </div>
-                <p className="mt-1 text-2xl font-bold text-emerald-900">
-                  {formatCurrency(floatingChequeTotal)}
-                </p>
-                <p className="mt-1 text-xs text-emerald-700">
-                  Deposited and pending realization
-                </p>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-      )}
       <Card>
         <CardHeader className="bg-gray-50 border-b border-gray-200 flex flex-row items-start justify-between">
           <CardTitle className="text-xl font-semibold text-gray-800">
@@ -1170,7 +1131,7 @@ const PaymentManagement = () => {
           
         </CardHeader>
 
-        <div className="mx-4 mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="mx-4 mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Card className="border-blue-100 bg-blue-50">
             <CardContent className="pt-6">
               <p className="text-sm text-blue-700">Credit Balance</p>
@@ -1182,11 +1143,47 @@ const PaymentManagement = () => {
               </p>
             </CardContent>
           </Card>
-          <Card className="border-emerald-100 bg-emerald-50">
+          <Card className="border-slate-200 bg-slate-50">
             <CardContent className="pt-6">
-              <p className="text-sm text-emerald-700">Total Cheque</p>
-              <p className="text-2xl font-bold tabular-nums text-emerald-900">
+              <p className="text-sm text-slate-700">Total Cheque</p>
+              <p className="text-2xl font-bold tabular-nums text-slate-900">
                 {formatCurrency(totalChequeAmount)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-amber-200 bg-amber-50">
+            <CardContent className="pt-6">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm text-amber-700">Cheque in Hand</p>
+                {inHandCheques.length > 0 && (
+                  <span className="rounded-full bg-amber-600 px-2 py-0.5 text-xs font-semibold text-white">
+                    {inHandCheques.length}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-amber-900">
+                {formatCurrency(chequeOnHandTotal)}
+              </p>
+              <p className="mt-1 text-xs text-amber-700">
+                Received but not yet deposited
+              </p>
+            </CardContent>
+          </Card>
+          <Card className="border-emerald-200 bg-emerald-50">
+            <CardContent className="pt-6">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm text-emerald-700">Floating Cheques</p>
+                {floatingCheques.length > 0 && (
+                  <span className="rounded-full bg-emerald-600 px-2 py-0.5 text-xs font-semibold text-white">
+                    {floatingCheques.length}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-emerald-900">
+                {formatCurrency(floatingChequeTotal)}
+              </p>
+              <p className="mt-1 text-xs text-emerald-700">
+                Deposited and pending realization
               </p>
             </CardContent>
           </Card>
@@ -1481,6 +1478,7 @@ const PaymentManagement = () => {
                 <TableHeader className="bg-gray-50">
                   <TableRow>
                     <TableHead className="text-black font-bold">Customer</TableHead>
+                    <TableHead className="text-black font-bold">Bill Date</TableHead>
                     <TableHead className="text-black font-bold">Due Date</TableHead>
                     <TableHead className="text-black font-bold text-right">Amount</TableHead>
                     <TableHead className="text-black font-bold text-right">Credit Limit</TableHead>
@@ -1495,6 +1493,11 @@ const PaymentManagement = () => {
                       return (
                         <TableRow key={`credit-${credit.CreditPaymentID}`}>
                           <TableCell>{credit.CustomerName}</TableCell>
+                          <TableCell>
+                            {credit.SaleDate
+                              ? format(new Date(credit.SaleDate), 'yyyy-MM-dd')
+                              : '—'}
+                          </TableCell>
                           <TableCell>
                             {format(new Date(credit.DueDate), 'yyyy-MM-dd')}
                           </TableCell>
@@ -1544,6 +1547,9 @@ const PaymentManagement = () => {
                         <TableCell>
                           {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
                         </TableCell>
+                        <TableCell>
+                          {format(new Date(openingBalance.BalanceDate), 'yyyy-MM-dd')}
+                        </TableCell>
                         <TableCell className="text-right tabular-nums">
                           {formatCurrency(displayAmount)}
                         </TableCell>
@@ -1583,7 +1589,7 @@ const PaymentManagement = () => {
                   })}
                   {pendingCreditRows.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center py-4">
+                      <TableCell colSpan={6} className="text-center py-4">
                         No pending credits found
                       </TableCell>
                     </TableRow>
