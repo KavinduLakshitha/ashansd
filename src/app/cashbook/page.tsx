@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { addDays, format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { useRouter } from "next/navigation";
-import { Download, Eraser, Plus, Trash2 } from "lucide-react";
+import { Download, Eraser, Pencil, Plus, Trash2 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -165,6 +165,7 @@ export default function CashbookPage() {
   const [creatingCategory, setCreatingCategory] = useState(false);
 
   const [newBankOpen, setNewBankOpen] = useState(false);
+  const [manageBanksOpen, setManageBanksOpen] = useState(false);
   const [newBankForm, setNewBankForm] = useState({
     name: "",
     bankCode: "",
@@ -178,6 +179,12 @@ export default function CashbookPage() {
   const [loadingDirectory, setLoadingDirectory] = useState(false);
   const [creatingBank, setCreatingBank] = useState(false);
   const [selectNewBankAfterCreate, setSelectNewBankAfterCreate] = useState(false);
+
+  const [editBankTarget, setEditBankTarget] = useState<BankAccount | null>(null);
+  const [editBankForm, setEditBankForm] = useState({ name: "", accountNumber: "" });
+  const [savingBankEdit, setSavingBankEdit] = useState(false);
+  const [deleteBankTarget, setDeleteBankTarget] = useState<BankAccount | null>(null);
+  const [deletingBank, setDeletingBank] = useState(false);
 
   const [form, setForm] = useState({
     entryDate: format(new Date(), "yyyy-MM-dd"),
@@ -321,6 +328,18 @@ export default function CashbookPage() {
     } finally {
       setLoadingDirectory(false);
     }
+  };
+
+  const openManageBanksDialog = () => {
+    setManageBanksOpen(true);
+  };
+
+  const openEditBankDialog = (account: BankAccount) => {
+    setEditBankTarget(account);
+    setEditBankForm({
+      name: account.Name || "",
+      accountNumber: account.AccountNumber || "",
+    });
   };
 
   const selectedDirectoryBank = directoryBanks.find(
@@ -475,6 +494,80 @@ export default function CashbookPage() {
       });
     } finally {
       setCreatingBank(false);
+    }
+  };
+
+  const handleUpdateBankAccount = async () => {
+    const businessLineId = getBusinessLineID();
+    if (!businessLineId || !editBankTarget) return;
+
+    const name = editBankForm.name.trim();
+    if (!name) {
+      toast({
+        title: "Invalid bank account",
+        description: "Enter an account name.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSavingBankEdit(true);
+    try {
+      await api.put(`/cashbook/bank-accounts/${editBankTarget.BankAccountID}`, {
+        businessLineId,
+        name,
+        accountNumber: editBankForm.accountNumber.trim() || null,
+      });
+      toast({
+        title: "Bank account updated",
+        description: `"${name}" saved.`,
+      });
+      setEditBankTarget(null);
+      await fetchBankAccounts();
+      await fetchData();
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message?: string }>;
+      toast({
+        title: "Error",
+        description: axiosError.response?.data?.message || "Failed to update bank account",
+        variant: "destructive",
+      });
+    } finally {
+      setSavingBankEdit(false);
+    }
+  };
+
+  const handleDeleteBankAccount = async () => {
+    const businessLineId = getBusinessLineID();
+    if (!businessLineId || !deleteBankTarget) return;
+
+    setDeletingBank(true);
+    try {
+      await api.delete(`/cashbook/bank-accounts/${deleteBankTarget.BankAccountID}`, {
+        params: { businessLineId },
+      });
+      toast({
+        title: "Bank account deleted",
+        description: `"${deleteBankTarget.Name}" was removed.`,
+      });
+      if (form.bankAccountId === String(deleteBankTarget.BankAccountID)) {
+        setForm((prev) => ({ ...prev, bankAccountId: "" }));
+      }
+      if (bankAccountFilter === String(deleteBankTarget.BankAccountID)) {
+        setBankAccountFilter("all");
+      }
+      setDeleteBankTarget(null);
+      await fetchBankAccounts();
+      await fetchData();
+    } catch (error) {
+      const axiosError = error as AxiosError<{ message?: string }>;
+      toast({
+        title: "Error",
+        description: axiosError.response?.data?.message || "Failed to delete bank account",
+        variant: "destructive",
+      });
+    } finally {
+      setDeletingBank(false);
     }
   };
 
@@ -820,9 +913,8 @@ export default function CashbookPage() {
                 Clear cashbook
               </Button>
             )}
-            <Button variant="outline" size="sm" onClick={() => openNewBankDialog(false)}>
-              <Plus className="h-4 w-4 mr-1" />
-              Add Bank Account
+            <Button variant="outline" size="sm" onClick={openManageBanksDialog}>
+              Bank Accounts
             </Button>
             <Button variant="outline" size="sm" onClick={() => openCreateDialog("OUT")}>
               Add Expense
@@ -1231,6 +1323,88 @@ export default function CashbookPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={manageBanksOpen} onOpenChange={setManageBanksOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Bank accounts</DialogTitle>
+            <DialogDescription>
+              View, edit, or remove bank accounts for this business line.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              onClick={() => openNewBankDialog(false)}
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              Add bank account
+            </Button>
+          </div>
+
+          <div className="rounded-md border max-h-[420px] overflow-auto">
+            <Table>
+              <TableHeader className="bg-gray-50">
+                <TableRow>
+                  <TableHead className="font-bold text-black">Account name</TableHead>
+                  <TableHead className="font-bold text-black">Bank</TableHead>
+                  <TableHead className="font-bold text-black">Branch</TableHead>
+                  <TableHead className="font-bold text-black">Account number</TableHead>
+                  <TableHead className="font-bold text-black text-center w-[100px]">
+                    Actions
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {bankAccounts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="text-center py-6 text-muted-foreground">
+                      No bank accounts yet. Add one to start recording bank entries.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  bankAccounts.map((account) => (
+                    <TableRow key={account.BankAccountID}>
+                      <TableCell className="font-medium">{account.Name}</TableCell>
+                      <TableCell>{account.BankName || "—"}</TableCell>
+                      <TableCell>{account.BranchName || "—"}</TableCell>
+                      <TableCell className="tabular-nums">
+                        {account.AccountNumber || "—"}
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => openEditBankDialog(account)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="hover:bg-red-50 hover:text-red-600"
+                            onClick={() => setDeleteBankTarget(account)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setManageBanksOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog
         open={newBankOpen}
         onOpenChange={(open) => {
@@ -1335,6 +1509,94 @@ export default function CashbookPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog
+        open={!!editBankTarget}
+        onOpenChange={(open) => {
+          if (!open && !savingBankEdit) setEditBankTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Edit bank account</DialogTitle>
+            <DialogDescription>
+              Update the account label or account number.
+              {editBankTarget?.BankName
+                ? ` Bank: ${editBankTarget.BankName}${
+                    editBankTarget.BranchName ? ` — ${editBankTarget.BranchName}` : ""
+                  }.`
+                : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label htmlFor="edit-bank-name">Account name</Label>
+              <Input
+                id="edit-bank-name"
+                value={editBankForm.name}
+                onChange={(e) =>
+                  setEditBankForm((prev) => ({ ...prev, name: e.target.value }))
+                }
+                maxLength={100}
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-bank-number">Account number (optional)</Label>
+              <Input
+                id="edit-bank-number"
+                value={editBankForm.accountNumber}
+                onChange={(e) =>
+                  setEditBankForm((prev) => ({ ...prev, accountNumber: e.target.value }))
+                }
+                maxLength={50}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleUpdateBankAccount();
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditBankTarget(null)}
+              disabled={savingBankEdit}
+            >
+              Cancel
+            </Button>
+            <Button onClick={handleUpdateBankAccount} disabled={savingBankEdit}>
+              {savingBankEdit ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={!!deleteBankTarget}
+        onOpenChange={(open) => !open && !deletingBank && setDeleteBankTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete bank account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes{" "}
+              <span className="font-medium text-foreground">
+                {deleteBankTarget?.Name}
+              </span>{" "}
+              from the account list. Existing cashbook entries stay, but will no longer
+              be linked to this account.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingBank}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteBankAccount} disabled={deletingBank}>
+              {deletingBank ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
