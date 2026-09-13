@@ -1606,9 +1606,9 @@ const SalesTable = () => {
           </DialogContent>
         </Dialog>
 
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
+        <div className="rounded-md border max-h-[calc(100vh-18rem)] overflow-auto">
+          <table className="w-full caption-bottom text-xs">
+            <TableHeader className="sticky top-0 z-10 bg-white shadow-sm">
               <TableRow>
                 <TableCell className="font-semibold">Invoice ID</TableCell>
                 <TableCell className="font-semibold">Date</TableCell>
@@ -1823,7 +1823,7 @@ const SalesTable = () => {
                   })
               )}
             </TableBody>
-          </Table>
+          </table>
         </div>
       </CardContent>
     </Card>

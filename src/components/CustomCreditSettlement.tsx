@@ -1313,7 +1313,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                     </p>
                   )}
                   <p className="text-sm text-gray-500 italic">
-                    Items will be settled in the order selected. Partial credit settlements create a new pending credit for the remaining balance.
+                    Items will be settled in the order selected. Partial credit settlements keep a pending credit for the remaining balance on the original sale date.
                   </p>
                 </div>
                   </>
