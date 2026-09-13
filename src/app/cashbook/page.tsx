@@ -66,6 +66,8 @@ interface CashbookEntry {
   Category: string;
   ExpenseCategoryID: number | null;
   ExpenseCategoryName: string | null;
+  ExpenseParentCategoryID?: number | null;
+  ExpenseParentCategoryName?: string | null;
   Description: string | null;
   ReferenceType: string | null;
   ReferenceID: number | null;
@@ -82,6 +84,8 @@ interface CashbookEntry {
 interface ExpenseCategory {
   ExpenseCategoryID: number;
   Name: string;
+  ParentCategoryID?: number | null;
+  ParentName?: string | null;
   IsPredefined: number | boolean;
 }
 
@@ -107,6 +111,30 @@ interface CashbookSummary {
 
 const CREATE_NEW_CATEGORY = "__create_new__";
 const CREATE_NEW_BANK_ACCOUNT = "__create_new_bank__";
+const DEFAULT_CATEGORY_TARGET = "__default__";
+const INITIAL_ENTRY_LINES = 5;
+
+type ManualEntryLine = {
+  id: string;
+  amount: string;
+  description: string;
+  expenseCategoryId: string;
+};
+
+const createEmptyLine = (): ManualEntryLine => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  amount: "",
+  description: "",
+  expenseCategoryId: "",
+});
+
+const createEmptyLines = (count: number): ManualEntryLine[] =>
+  Array.from({ length: Math.max(0, count) }, (_, index) => ({
+    id: `${Date.now()}-${index}-${Math.random().toString(36).slice(2, 9)}`,
+    amount: "",
+    description: "",
+    expenseCategoryId: "",
+  }));
 
 const formatCurrency = (amount: number) =>
   `Rs. ${Number(amount).toLocaleString(undefined, {
@@ -119,6 +147,20 @@ const categoryLabel = (category: string) =>
     .replace(/_/g, " ")
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase());
+
+const formatExpenseCategoryOption = (cat: ExpenseCategory) =>
+  cat.ParentName ? `${cat.ParentName} › ${cat.Name}` : cat.Name;
+
+const formatEntryExpenseCategory = (entry: {
+  ExpenseCategoryName?: string | null;
+  ExpenseParentCategoryName?: string | null;
+}) => {
+  if (!entry.ExpenseCategoryName) return "—";
+  if (entry.ExpenseParentCategoryName) {
+    return `${entry.ExpenseParentCategoryName} › ${entry.ExpenseCategoryName}`;
+  }
+  return entry.ExpenseCategoryName;
+};
 
 export default function CashbookPage() {
   const { user, getBusinessLineID } = useAuth();
@@ -164,7 +206,9 @@ export default function CashbookPage() {
 
   const [newCategoryOpen, setNewCategoryOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [newCategoryParentId, setNewCategoryParentId] = useState<string>("");
   const [creatingCategory, setCreatingCategory] = useState(false);
+  const [categoryLineId, setCategoryLineId] = useState<string | null>(null);
 
   const [newBankOpen, setNewBankOpen] = useState(false);
   const [manageBanksOpen, setManageBanksOpen] = useState(false);
@@ -194,11 +238,10 @@ export default function CashbookPage() {
   const [form, setForm] = useState({
     entryDate: format(new Date(), "yyyy-MM-dd"),
     direction: "IN" as "IN" | "OUT",
-    amount: "",
     accountType: "CASH" as "CASH" | "BANK",
     bankAccountId: "",
-    description: "",
-    expenseCategoryId: "",
+    defaultExpenseCategoryId: "",
+    lines: createEmptyLines(INITIAL_ENTRY_LINES) as ManualEntryLine[],
   });
 
   const [transferForm, setTransferForm] = useState({
@@ -309,12 +352,12 @@ export default function CashbookPage() {
     setForm({
       entryDate: format(new Date(), "yyyy-MM-dd"),
       direction,
-      amount: "",
       accountType: "CASH",
       bankAccountId: "",
-      description: "",
-      expenseCategoryId: "",
+      defaultExpenseCategoryId: "",
+      lines: createEmptyLines(INITIAL_ENTRY_LINES),
     });
+    setCategoryLineId(null);
     setDialogOpen(true);
   };
 
@@ -407,13 +450,79 @@ export default function CashbookPage() {
     }));
   };
 
-  const handleExpenseCategorySelect = (value: string) => {
+  const updateFormLine = (lineId: string, patch: Partial<ManualEntryLine>) => {
+    setForm((prev) => ({
+      ...prev,
+      lines: prev.lines.map((line) =>
+        line.id === lineId ? { ...line, ...patch } : line
+      ),
+    }));
+  };
+
+  const addFormLines = (count = INITIAL_ENTRY_LINES) => {
+    setForm((prev) => {
+      const remaining = 50 - prev.lines.length;
+      if (remaining <= 0) return prev;
+      return {
+        ...prev,
+        lines: [...prev.lines, ...createEmptyLines(Math.min(count, remaining))],
+      };
+    });
+  };
+
+  const removeFormLine = (lineId: string) => {
+    setForm((prev) => {
+      if (prev.lines.length <= 1) {
+        return {
+          ...prev,
+          lines: [createEmptyLine()],
+        };
+      }
+      return {
+        ...prev,
+        lines: prev.lines.filter((line) => line.id !== lineId),
+      };
+    });
+  };
+
+  const applyDefaultCategoryToAll = () => {
+    if (!form.defaultExpenseCategoryId) {
+      toast({
+        title: "Select a category first",
+        description: "Choose the shared category, then apply it to every row.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setForm((prev) => ({
+      ...prev,
+      lines: prev.lines.map((line) => ({
+        ...line,
+        expenseCategoryId: prev.defaultExpenseCategoryId,
+      })),
+    }));
+  };
+
+  const handleDefaultExpenseCategorySelect = (value: string) => {
     if (value === CREATE_NEW_CATEGORY) {
+      setCategoryLineId(DEFAULT_CATEGORY_TARGET);
       setNewCategoryName("");
+      setNewCategoryParentId("");
       setNewCategoryOpen(true);
       return;
     }
-    setForm((prev) => ({ ...prev, expenseCategoryId: value }));
+    setForm((prev) => ({ ...prev, defaultExpenseCategoryId: value }));
+  };
+
+  const handleExpenseCategorySelect = (lineId: string, value: string) => {
+    if (value === CREATE_NEW_CATEGORY) {
+      setCategoryLineId(lineId);
+      setNewCategoryName("");
+      setNewCategoryParentId(form.defaultExpenseCategoryId || "");
+      setNewCategoryOpen(true);
+      return;
+    }
+    updateFormLine(lineId, { expenseCategoryId: value });
   };
 
   const handleBankAccountSelect = (value: string) => {
@@ -443,16 +552,28 @@ export default function CashbookPage() {
       const response = await api.post("/cashbook/expense-categories", {
         businessLineId,
         name,
+        parentCategoryId: newCategoryParentId
+          ? Number(newCategoryParentId)
+          : undefined,
       });
       const created: ExpenseCategory = response.data.data;
       await fetchExpenseCategories();
-      setForm((prev) => ({
-        ...prev,
-        expenseCategoryId: String(created.ExpenseCategoryID),
-      }));
+      const createdId = String(created.ExpenseCategoryID);
+      if (categoryLineId === DEFAULT_CATEGORY_TARGET) {
+        setForm((prev) => ({ ...prev, defaultExpenseCategoryId: createdId }));
+      } else if (categoryLineId) {
+        updateFormLine(categoryLineId, {
+          expenseCategoryId: createdId,
+        });
+      }
       setNewCategoryOpen(false);
       setNewCategoryName("");
-      toast({ title: "Category added", description: `"${created.Name}" is ready to use.` });
+      setNewCategoryParentId("");
+      setCategoryLineId(null);
+      toast({
+        title: created.ParentCategoryID ? "Subcategory added" : "Category added",
+        description: `"${formatExpenseCategoryOption(created)}" is ready to use.`,
+      });
     } catch (error) {
       const axiosError = error as AxiosError<{ message?: string }>;
       toast({
@@ -621,20 +742,10 @@ export default function CashbookPage() {
     const businessLineId = getBusinessLineID();
     if (!businessLineId) return;
 
-    const amount = parseFloat(form.amount);
-    if (!form.entryDate || !(amount > 0)) {
+    if (!form.entryDate) {
       toast({
         title: "Invalid entry",
-        description: "Enter a valid date and amount greater than zero.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (form.direction === "OUT" && !form.expenseCategoryId) {
-      toast({
-        title: "Category required",
-        description: "Select an expense category.",
+        description: "Enter a valid date.",
         variant: "destructive",
       });
       return;
@@ -649,29 +760,86 @@ export default function CashbookPage() {
       return;
     }
 
+    const activeLines = form.lines
+      .map((line, index) => ({
+        index,
+        amountRaw: line.amount.trim(),
+        amount: parseFloat(line.amount),
+        description: line.description.trim(),
+        expenseCategoryId:
+          line.expenseCategoryId || form.defaultExpenseCategoryId || "",
+        hasContent:
+          line.amount.trim() !== "" ||
+          line.description.trim() !== "" ||
+          !!line.expenseCategoryId,
+      }))
+      .filter((line) => line.hasContent);
+
+    if (activeLines.length === 0) {
+      toast({
+        title: "Nothing to save",
+        description: "Enter at least one amount in the table.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const invalidAmount = activeLines.find(
+      (line) => line.amountRaw === "" || !(line.amount > 0)
+    );
+    if (invalidAmount) {
+      toast({
+        title: "Invalid amount",
+        description: `Row ${invalidAmount.index + 1}: enter an amount greater than zero.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (form.direction === "OUT") {
+      const missingCategory = activeLines.find((line) => !line.expenseCategoryId);
+      if (missingCategory) {
+        toast({
+          title: "Category required",
+          description: `Row ${missingCategory.index + 1}: select a category, or set a shared category above the table.`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     setSaving(true);
     try {
-      await api.post("/cashbook", {
+      const response = await api.post("/cashbook/bulk", {
         businessLineId,
         entryDate: form.entryDate,
         direction: form.direction,
-        amount,
         accountType: form.accountType,
         bankAccountId:
           form.accountType === "BANK" ? Number(form.bankAccountId) : undefined,
-        description: form.description || undefined,
-        category: form.direction === "IN" ? "MANUAL_INCOME" : "MANUAL_EXPENSE",
-        expenseCategoryId:
-          form.direction === "OUT" ? Number(form.expenseCategoryId) : undefined,
+        entries: activeLines.map((line) => ({
+          amount: line.amount,
+          description: line.description || undefined,
+          category: form.direction === "IN" ? "MANUAL_INCOME" : "MANUAL_EXPENSE",
+          expenseCategoryId:
+            form.direction === "OUT" ? Number(line.expenseCategoryId) : undefined,
+        })),
       });
-      toast({ title: "Entry added", description: "Manual cashbook entry created." });
+      const count = Number(response.data.count || activeLines.length);
+      toast({
+        title: count === 1 ? "Entry added" : "Entries added",
+        description:
+          count === 1
+            ? "Manual cashbook entry created."
+            : `${count} manual cashbook entries created.`,
+      });
       setDialogOpen(false);
       await fetchData();
     } catch (error) {
       const axiosError = error as AxiosError<{ message?: string }>;
       toast({
         title: "Error",
-        description: axiosError.response?.data?.message || "Failed to create entry",
+        description: axiosError.response?.data?.message || "Failed to create entries",
         variant: "destructive",
       });
     } finally {
@@ -888,7 +1056,9 @@ export default function CashbookPage() {
           entry.Direction === "IN" ? amount : 0,
           entry.Direction === "OUT" ? amount : 0,
           categoryLabel(entry.Category),
-          entry.ExpenseCategoryName || "",
+          entry.ExpenseCategoryName
+            ? formatEntryExpenseCategory(entry)
+            : "",
           entry.Description || "",
           entry.ReferenceType || "",
           entry.ReferenceID ?? "",
@@ -1022,6 +1192,9 @@ export default function CashbookPage() {
     entry.Category === "MANUAL_EXPENSE" ||
     entry.Category === "TRANSFER_OUT" ||
     entry.Category === "TRANSFER_IN";
+
+  const rootExpenseCategories = expenseCategories.filter((cat) => !cat.ParentCategoryID);
+  const hasSavableManualEntry = form.lines.some((line) => Number(line.amount) > 0);
 
   const isTransferEntry = (entry: CashbookEntry | null) =>
     !!entry &&
@@ -1180,14 +1353,14 @@ export default function CashbookPage() {
               </Select>
             )}
             <Select value={expenseCategoryFilter} onValueChange={setExpenseCategoryFilter}>
-              <SelectTrigger className="w-[180px]">
+              <SelectTrigger className="w-[220px]">
                 <SelectValue placeholder="Expense category" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All expense categories</SelectItem>
                 {expenseCategories.map((cat) => (
                   <SelectItem key={cat.ExpenseCategoryID} value={String(cat.ExpenseCategoryID)}>
-                    {cat.Name}
+                    {cat.ParentCategoryID ? `↳ ${cat.Name}` : cat.Name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1239,7 +1412,7 @@ export default function CashbookPage() {
                         </Badge>
                       </TableCell>
                       <TableCell>{categoryLabel(entry.Category)}</TableCell>
-                      <TableCell>{entry.ExpenseCategoryName || "—"}</TableCell>
+                      <TableCell>{formatEntryExpenseCategory(entry)}</TableCell>
                       <TableCell>
                         {entry.AccountType === "BANK"
                           ? entry.BankAccountName
@@ -1282,144 +1455,300 @@ export default function CashbookPage() {
       </Card>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {form.direction === "IN" ? "Add Income" : "Add Expense"}
             </DialogTitle>
             <DialogDescription>
-              Create a manual cashbook entry. Sales, purchases, and cheque realizations are recorded automatically.
+              Set the account once, then fill rows like a spreadsheet. Empty rows are
+              skipped on save. Sales, purchases, and cheque realizations are recorded
+              automatically.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div>
-              <Label htmlFor="cb-date">Date</Label>
-              <Input
-                id="cb-date"
-                type="date"
-                value={form.entryDate}
-                onChange={(e) => setForm((prev) => ({ ...prev, entryDate: e.target.value }))}
-              />
+          <div className="space-y-4 py-2">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <Label htmlFor="cb-date">Date</Label>
+                <Input
+                  id="cb-date"
+                  type="date"
+                  value={form.entryDate}
+                  onChange={(e) => setForm((prev) => ({ ...prev, entryDate: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label>Direction</Label>
+                <Select
+                  value={form.direction}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      direction: value as "IN" | "OUT",
+                      defaultExpenseCategoryId:
+                        value === "IN" ? "" : prev.defaultExpenseCategoryId,
+                      lines: prev.lines.map((line) => ({
+                        ...line,
+                        expenseCategoryId: value === "IN" ? "" : line.expenseCategoryId,
+                      })),
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="IN">In (Income)</SelectItem>
+                    <SelectItem value="OUT">Out (Expense)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Account</Label>
+                <Select
+                  value={form.accountType}
+                  onValueChange={(value) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      accountType: value as "CASH" | "BANK",
+                      bankAccountId: value === "CASH" ? "" : prev.bankAccountId,
+                    }))
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CASH">Cash</SelectItem>
+                    <SelectItem value="BANK">Bank</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {form.accountType === "BANK" && (
+                <div>
+                  <Label>Bank Account</Label>
+                  <Select
+                    value={form.bankAccountId || undefined}
+                    onValueChange={handleBankAccountSelect}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select bank account" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bankAccounts.map((account) => (
+                        <SelectItem
+                          key={account.BankAccountID}
+                          value={String(account.BankAccountID)}
+                        >
+                          {account.Name}
+                          {account.BankName ? ` (${account.BankName}` : ""}
+                          {account.BranchName ? ` — ${account.BranchName}` : ""}
+                          {account.BankName ? ")" : ""}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value={CREATE_NEW_BANK_ACCOUNT}>
+                        + Create new bank account
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
-            <div>
-              <Label>Direction</Label>
-              <Select
-                value={form.direction}
-                onValueChange={(value) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    direction: value as "IN" | "OUT",
-                    expenseCategoryId: value === "IN" ? "" : prev.expenseCategoryId,
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="IN">In (Income)</SelectItem>
-                  <SelectItem value="OUT">Out (Expense)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+
             {form.direction === "OUT" && (
-              <div>
-                <Label>Expense Category</Label>
-                <Select
-                  value={form.expenseCategoryId || undefined}
-                  onValueChange={handleExpenseCategorySelect}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {expenseCategories.map((cat) => (
-                      <SelectItem key={cat.ExpenseCategoryID} value={String(cat.ExpenseCategoryID)}>
-                        {cat.Name}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={CREATE_NEW_CATEGORY}>+ Create new category</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="rounded-md border bg-muted/20 p-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                  <div className="flex-1 min-w-0">
+                    <Label>Shared category (optional)</Label>
+                    <p className="text-xs text-muted-foreground mb-1.5">
+                      Use one category for every blank row. Override per row when needed.
+                    </p>
+                    <Select
+                      value={form.defaultExpenseCategoryId || undefined}
+                      onValueChange={handleDefaultExpenseCategorySelect}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Same category for all rows" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {expenseCategories.map((cat) => (
+                          <SelectItem
+                            key={cat.ExpenseCategoryID}
+                            value={String(cat.ExpenseCategoryID)}
+                          >
+                            {cat.ParentCategoryID
+                              ? `${cat.ParentName} › ${cat.Name}`
+                              : cat.Name}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value={CREATE_NEW_CATEGORY}>
+                          + Create new category / subcategory
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={applyDefaultCategoryToAll}
+                    disabled={saving || !form.defaultExpenseCategoryId}
+                  >
+                    Apply to all rows
+                  </Button>
+                </div>
               </div>
             )}
-            <div>
-              <Label>Account</Label>
-              <Select
-                value={form.accountType}
-                onValueChange={(value) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    accountType: value as "CASH" | "BANK",
-                    bankAccountId: value === "CASH" ? "" : prev.bankAccountId,
-                  }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CASH">Cash</SelectItem>
-                  <SelectItem value="BANK">Bank</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {form.accountType === "BANK" && (
-              <div>
-                <Label>Bank Account</Label>
-                <Select
-                  value={form.bankAccountId || undefined}
-                  onValueChange={handleBankAccountSelect}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select bank account" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {bankAccounts.map((account) => (
-                      <SelectItem
-                        key={account.BankAccountID}
-                        value={String(account.BankAccountID)}
-                      >
-                        {account.Name}
-                        {account.BankName ? ` (${account.BankName}` : ""}
-                        {account.BranchName ? ` — ${account.BranchName}` : ""}
-                        {account.BankName ? ")" : ""}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={CREATE_NEW_BANK_ACCOUNT}>
-                      + Create new bank account
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-sm font-medium">
+                  {form.direction === "IN" ? "Income grid" : "Expense grid"}
+                </Label>
+                <span className="text-xs text-muted-foreground">
+                  {form.lines.length} rows · empty rows ignored
+                </span>
               </div>
-            )}
-            <div>
-              <Label htmlFor="cb-amount">Amount (Rs.)</Label>
-              <Input
-                id="cb-amount"
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.amount}
-                onChange={(e) => setForm((prev) => ({ ...prev, amount: e.target.value }))}
-              />
-            </div>
-            <div>
-              <Label htmlFor="cb-desc">Description</Label>
-              <Input
-                id="cb-desc"
-                value={form.description}
-                onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                placeholder="Optional note"
-              />
+
+              <div className="rounded-md border overflow-x-auto">
+                <Table>
+                  <TableHeader className="bg-muted/40">
+                    <TableRow>
+                      <TableHead className="w-10 text-center">#</TableHead>
+                      {form.direction === "OUT" && (
+                        <TableHead className="min-w-[200px]">Category</TableHead>
+                      )}
+                      <TableHead className="min-w-[130px]">Amount (Rs.)</TableHead>
+                      <TableHead className="min-w-[220px]">Description</TableHead>
+                      <TableHead className="w-12 text-center" />
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {form.lines.map((line, index) => (
+                      <TableRow key={line.id} className="align-middle">
+                        <TableCell className="text-center text-muted-foreground tabular-nums text-xs">
+                          {index + 1}
+                        </TableCell>
+                        {form.direction === "OUT" && (
+                          <TableCell className="p-1.5">
+                            <Select
+                              value={
+                                line.expenseCategoryId ||
+                                form.defaultExpenseCategoryId ||
+                                undefined
+                              }
+                              onValueChange={(value) =>
+                                handleExpenseCategorySelect(line.id, value)
+                              }
+                            >
+                              <SelectTrigger className="h-9 border-0 shadow-none bg-transparent focus:ring-1">
+                                <SelectValue
+                                  placeholder={
+                                    form.defaultExpenseCategoryId
+                                      ? "Using shared category"
+                                      : "Select category"
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {expenseCategories.map((cat) => (
+                                  <SelectItem
+                                    key={cat.ExpenseCategoryID}
+                                    value={String(cat.ExpenseCategoryID)}
+                                  >
+                                    {cat.ParentCategoryID
+                                      ? `${cat.ParentName} › ${cat.Name}`
+                                      : cat.Name}
+                                  </SelectItem>
+                                ))}
+                                <SelectItem value={CREATE_NEW_CATEGORY}>
+                                  + Create new category / subcategory
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                        )}
+                        <TableCell className="p-1.5">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={line.amount}
+                            onChange={(e) =>
+                              updateFormLine(line.id, { amount: e.target.value })
+                            }
+                            className="h-9 border-0 shadow-none bg-transparent focus-visible:ring-1"
+                            placeholder="0.00"
+                          />
+                        </TableCell>
+                        <TableCell className="p-1.5">
+                          <Input
+                            value={line.description}
+                            onChange={(e) =>
+                              updateFormLine(line.id, { description: e.target.value })
+                            }
+                            className="h-9 border-0 shadow-none bg-transparent focus-visible:ring-1"
+                            placeholder="Optional note"
+                            onKeyDown={(e) => {
+                              if (
+                                e.key === "Enter" &&
+                                index === form.lines.length - 1 &&
+                                form.lines.length < 50
+                              ) {
+                                e.preventDefault();
+                                addFormLines(1);
+                              }
+                            }}
+                          />
+                        </TableCell>
+                        <TableCell className="p-1 text-center">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+                            onClick={() => removeFormLine(line.id)}
+                            disabled={saving}
+                            aria-label={`Remove row ${index + 1}`}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addFormLines(1)}
+                  disabled={saving || form.lines.length >= 50}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add row
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => addFormLines(INITIAL_ENTRY_LINES)}
+                  disabled={saving || form.lines.length >= 50}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add {INITIAL_ENTRY_LINES} rows
+                </Button>
+              </div>
             </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
               Cancel
             </Button>
-            <Button onClick={handleCreate} disabled={saving}>
-              {saving ? "Saving..." : "Save Entry"}
+            <Button onClick={handleCreate} disabled={saving || !hasSavableManualEntry}>
+              {saving ? "Saving..." : "Save Entries"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1589,34 +1918,79 @@ export default function CashbookPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={newCategoryOpen} onOpenChange={setNewCategoryOpen}>
+      <Dialog
+        open={newCategoryOpen}
+        onOpenChange={(open) => {
+          setNewCategoryOpen(open);
+          if (!open) {
+            setCategoryLineId(null);
+            setNewCategoryParentId("");
+            setNewCategoryName("");
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>New expense category</DialogTitle>
             <DialogDescription>
-              Add a custom category for this business line. It will appear in the expense dropdown.
+              Create a main category, or choose a parent to add a subcategory under it.
             </DialogDescription>
           </DialogHeader>
-          <div className="py-2">
-            <Label htmlFor="new-cat-name">Name</Label>
-            <Input
-              id="new-cat-name"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              placeholder="e.g. Packaging"
-              maxLength={100}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleCreateCategory();
+          <div className="space-y-3 py-2">
+            <div>
+              <Label>Parent category (optional)</Label>
+              <Select
+                value={newCategoryParentId || "__none__"}
+                onValueChange={(value) =>
+                  setNewCategoryParentId(value === "__none__" ? "" : value)
                 }
-              }}
-            />
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="None — main category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">None — main category</SelectItem>
+                  {rootExpenseCategories.map((cat) => (
+                    <SelectItem
+                      key={cat.ExpenseCategoryID}
+                      value={String(cat.ExpenseCategoryID)}
+                    >
+                      {cat.Name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="new-cat-name">
+                {newCategoryParentId ? "Subcategory name" : "Category name"}
+              </Label>
+              <Input
+                id="new-cat-name"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                placeholder={
+                  newCategoryParentId ? "e.g. Fuel" : "e.g. Packaging"
+                }
+                maxLength={100}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleCreateCategory();
+                  }
+                }}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setNewCategoryOpen(false)}
+              onClick={() => {
+                setNewCategoryOpen(false);
+                setCategoryLineId(null);
+                setNewCategoryParentId("");
+                setNewCategoryName("");
+              }}
               disabled={creatingCategory}
             >
               Cancel

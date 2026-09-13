@@ -163,14 +163,6 @@ const buildPendingCreditRows = (
   return rows;
 };
 
-interface MarkReceivedDialogState {
-  isOpen: boolean;
-  cheque: Cheque | null;
-  chequeNumber: string;
-  bank: string;
-  receivedDate: string;
-}
-
 interface MarkDepositedDialogState {
   isOpen: boolean;
   cheque: Cheque | null;
@@ -221,23 +213,19 @@ const PaymentManagement = () => {
     [pendingPayments.pendingCredits, pendingPayments.pendingOpeningBalances]
   );
 
-  const { awaitingReceiptCheques, inHandCheques, floatingCheques } = useMemo(() => {
-    const awaiting: Cheque[] = [];
+  const { inHandCheques, floatingCheques } = useMemo(() => {
     const inHand: Cheque[] = [];
     const floating: Cheque[] = [];
 
     for (const cheque of pendingPayments.pendingCheques) {
       if (cheque.DepositedDate) {
         floating.push(cheque);
-      } else if (cheque.ReceivedDate) {
-        inHand.push(cheque);
       } else {
-        awaiting.push(cheque);
+        inHand.push(cheque);
       }
     }
 
     return {
-      awaitingReceiptCheques: awaiting,
       inHandCheques: inHand,
       floatingCheques: floating,
     };
@@ -277,13 +265,7 @@ const PaymentManagement = () => {
 
   // Remaining credit after cash, in-hand cheques, and floating (deposited) cheques.
   // Settled cash is already excluded from pending credits.
-  const creditBalance = useMemo(() => {
-    const awaitingReceiptTotal = awaitingReceiptCheques.reduce(
-      (sum, cheque) => sum + Number(cheque.Amount || 0),
-      0
-    );
-    return totalCreditAmount + awaitingReceiptTotal;
-  }, [totalCreditAmount, awaitingReceiptCheques]);
+  const creditBalance = totalCreditAmount;
 
   // State for confirmation dialog
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
@@ -292,14 +274,6 @@ const PaymentManagement = () => {
     paymentId: null,
     title: '',
     description: ''
-  });
-
-  const [markReceivedDialog, setMarkReceivedDialog] = useState<MarkReceivedDialogState>({
-    isOpen: false,
-    cheque: null,
-    chequeNumber: '',
-    bank: '',
-    receivedDate: format(new Date(), 'yyyy-MM-dd'),
   });
 
   const [markDepositedDialog, setMarkDepositedDialog] = useState<MarkDepositedDialogState>({
@@ -649,72 +623,6 @@ const PaymentManagement = () => {
       setProcessingIds(prev => {
         const newSet = new Set(prev);
         newSet.delete(chequePaymentId);
-        return newSet;
-      });
-    }
-  };
-
-  const openMarkReceivedDialog = (cheque: Cheque) => {
-    setMarkReceivedDialog({
-      isOpen: true,
-      cheque,
-      chequeNumber: cheque.ChequeNumber || '',
-      bank: cheque.Bank || '',
-      receivedDate: format(new Date(), 'yyyy-MM-dd'),
-    });
-  };
-
-  const closeMarkReceivedDialog = () => {
-    setMarkReceivedDialog((prev) => ({ ...prev, isOpen: false, cheque: null }));
-  };
-
-  const handleMarkChequeReceived = async () => {
-    const { cheque, chequeNumber, bank, receivedDate } = markReceivedDialog;
-    if (!cheque) return;
-
-    if (!chequeNumber.trim() || !bank.trim()) {
-      toast({
-        variant: 'destructive',
-        title: 'Missing details',
-        description: 'Cheque number and bank are required when marking a cheque as received.',
-        duration: 3000,
-      });
-      return;
-    }
-
-    try {
-      setProcessingIds((prev) => new Set(prev).add(cheque.ChequePaymentID));
-      await axios.put(
-        `${process.env.NEXT_PUBLIC_API_URL}/payments/cheque/${cheque.ChequePaymentID}/receive`,
-        {
-          receivedDate,
-          chequeNumber: chequeNumber.trim(),
-          bank: bank.trim(),
-        }
-      );
-      closeMarkReceivedDialog();
-      await fetchPendingPayments();
-      toast({
-        title: 'Success',
-        description: 'Cheque marked as received and moved to in hand.',
-        duration: 3000,
-      });
-    } catch (err: unknown) {
-      const errorMessage =
-        err instanceof AxiosError
-          ? err.response?.data?.message || 'Error marking cheque as received'
-          : 'Error marking cheque as received';
-      setError(`Error: ${errorMessage}`);
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: errorMessage,
-        duration: 3000,
-      });
-    } finally {
-      setProcessingIds((prev) => {
-        const newSet = new Set(prev);
-        newSet.delete(cheque.ChequePaymentID);
         return newSet;
       });
     }
@@ -1227,81 +1135,6 @@ const PaymentManagement = () => {
             <CardContent className="mt-6 space-y-8">
               <div>
                 <h3 className="text-lg font-semibold mb-3">
-                  Awaiting receipt ({awaitingReceiptCheques.length})
-                </h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Customer agreed to pay by cheque, but the physical cheque is not yet in hand.
-                </p>
-              <Table className="border">
-                <TableHeader className="bg-gray-50">
-                  <TableRow>
-                    <TableHead className="text-black w-40 font-bold">Cheque #</TableHead>
-                    <TableHead className="text-black font-bold">Customer</TableHead>
-                    <TableHead className="text-black font-bold">Realize Date</TableHead>
-                    <TableHead className="text-black font-bold">Bank</TableHead>
-                    <TableHead className="text-black font-bold text-right">Amount</TableHead>
-                    <TableHead className="text-black font-bold text-right">Credit Limit</TableHead>
-                    <TableHead className="text-black font-bold text-center">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {awaitingReceiptCheques.map((cheque) => (
-                    <TableRow key={cheque.ChequePaymentID}>
-                      <TableCell>{cheque.ChequeNumber || '—'}</TableCell>
-                      <TableCell>{cheque.CustomerName}</TableCell>
-                      <TableCell>
-                        {format(new Date(cheque.RealizeDate), 'yyyy-MM-dd')}
-                      </TableCell>
-                      <TableCell>{cheque.Bank || '—'}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatCurrency(cheque.Amount)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatCurrency(cheque.CreditLimit)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-center items-center gap-2">
-                          <Button
-                            variant="default"
-                            onClick={() => openMarkReceivedDialog(cheque)}
-                            disabled={processingIds.has(cheque.ChequePaymentID)}
-                            size="sm"
-                          >
-                            {processingIds.has(cheque.ChequePaymentID) ? 'Processing...' : 'Mark received'}
-                          </Button>
-                          {user?.userType !== 'management' && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => confirmDeleteChequeRealization(cheque)}
-                              disabled={processingIds.has(cheque.ChequePaymentID)}
-                              className="hover:bg-red-50 hover:text-red-600"
-                              title="Delete Payment & Sale"
-                            >
-                              {processingIds.has(cheque.ChequePaymentID) ? (
-                                <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
-                              ) : (
-                                <Trash2 className="h-4 w-4" />
-                              )}
-                            </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {awaitingReceiptCheques.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={7} className="text-center py-4">
-                        No cheques awaiting receipt
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-              </div>
-
-              <div>
-                <h3 className="text-lg font-semibold mb-3">
                   In hand ({inHandCheques.length})
                 </h3>
                 <p className="text-sm text-muted-foreground mb-4">
@@ -1600,61 +1433,6 @@ const PaymentManagement = () => {
           </TabsContent>
         </Tabs>
       </Card>
-
-      {/* Mark Cheque Received Dialog */}
-      <Dialog open={markReceivedDialog.isOpen} onOpenChange={(open) => !open && closeMarkReceivedDialog()}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Mark cheque as received</DialogTitle>
-            <DialogDescription>
-              Record that the physical cheque is now in hand. Deposit it later to move it to floating.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div>
-              <Label htmlFor="mark-received-date">Received date</Label>
-              <Input
-                id="mark-received-date"
-                type="date"
-                value={markReceivedDialog.receivedDate}
-                onChange={(e) =>
-                  setMarkReceivedDialog((prev) => ({ ...prev, receivedDate: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <Label htmlFor="mark-received-number">Cheque number</Label>
-              <Input
-                id="mark-received-number"
-                value={markReceivedDialog.chequeNumber}
-                onChange={(e) =>
-                  setMarkReceivedDialog((prev) => ({ ...prev, chequeNumber: e.target.value }))
-                }
-                placeholder="Enter cheque number"
-              />
-            </div>
-            <div>
-              <Label htmlFor="mark-received-bank">Bank</Label>
-              <Input
-                id="mark-received-bank"
-                value={markReceivedDialog.bank}
-                onChange={(e) =>
-                  setMarkReceivedDialog((prev) => ({ ...prev, bank: e.target.value }))
-                }
-                placeholder="Enter bank name"
-              />
-            </div>
-          </div>
-          <DialogFooter className="mt-4 gap-2">
-            <Button variant="outline" onClick={closeMarkReceivedDialog}>
-              Cancel
-            </Button>
-            <Button onClick={handleMarkChequeReceived}>
-              Mark received
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Mark Cheque Deposited Dialog */}
       <Dialog open={markDepositedDialog.isOpen} onOpenChange={(open) => !open && closeMarkDepositedDialog()}>

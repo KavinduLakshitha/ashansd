@@ -51,7 +51,7 @@ interface Sale {
   CustomerID: string;
   CustomerName: string;
   PaymentID: string;
-  PaymentMethod: 'CASH' | 'CHEQUE' | 'CREDIT';
+  PaymentMethod: 'CASH' | 'CHEQUE' | 'CREDIT' | 'BANK_TRANSFER';
   Amount: number;
   PaymentDate: string;
   paymentDetails: PaymentDetails | null;
@@ -370,6 +370,11 @@ const SalesTable = () => {
     
     switch (sale.PaymentMethod) {
       case 'CASH':
+        return {
+          text: 'PAID',
+          className: 'bg-green-100 text-green-800'
+        };
+      case 'BANK_TRANSFER':
         return {
           text: 'PAID',
           className: 'bg-green-100 text-green-800'
@@ -1451,6 +1456,7 @@ const SalesTable = () => {
                 <SelectItem value="ALL">All Payments</SelectItem>
                 <SelectItem value="CASH">Cash</SelectItem>
                 <SelectItem value="CHEQUE">Cheque</SelectItem>
+                <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
                 <SelectItem value="CREDIT">Credit</SelectItem>
               </SelectContent>
             </Select>
@@ -1760,6 +1766,7 @@ const SalesTable = () => {
                                               <>Due: {new Date(sale.paymentDetails.dueDate).toLocaleDateString()}</>
                                             )}
                                             {sale.PaymentMethod === 'CASH' && 'Paid in Cash'}
+                                            {sale.PaymentMethod === 'BANK_TRANSFER' && 'Paid via Bank Transfer'}
                                           </TableCell>
                                         </TableRow>
                                       ))}

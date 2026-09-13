@@ -902,6 +902,10 @@ const PaymentStatusHistory: React.FC = () => {
         return <Badge variant="outline" className="border-orange-500 text-orange-500">Credit</Badge>;
       case 'CHEQUE':
         return <Badge variant="outline" className="border-blue-500 text-blue-500">Cheque</Badge>;
+      case 'BANK_TRANSFER':
+        return <Badge variant="outline" className="border-emerald-500 text-emerald-600">Bank Transfer</Badge>;
+      case 'CASH':
+        return <Badge variant="outline" className="border-green-500 text-green-600">Cash</Badge>;
       default:
         return <Badge variant="default">{method}</Badge>;
     }

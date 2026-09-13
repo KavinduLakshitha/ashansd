@@ -27,7 +27,8 @@ export default function DialogCustomerSelect({
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { getBusinessLineID } = useAuth();
 
@@ -77,24 +78,19 @@ export default function DialogCustomerSelect({
     return name.includes(query) || code.includes(query) || String(customer.CustomerID).includes(query);
   });
 
-  const handleSelectCustomer = (customer: Customer) => {
-    const customerName = getCustomerDisplayName(customer);
-    onChange(customerName, customer.CustomerID);
-    onSelectCustomer?.(customer);
-    setIsOpen(false);
-    setSearchQuery("");
-  };
-
-  const stopEvent = (event: React.SyntheticEvent) => {
-    event.stopPropagation();
-  };
-
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setSearchQuery("");
+      return;
+    }
+
+    const focusTimer = window.setTimeout(() => {
+      searchInputRef.current?.focus();
+    }, 0);
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (dropdownRef.current && !dropdownRef.current.contains(target)) {
+      if (containerRef.current && !containerRef.current.contains(target)) {
         setIsOpen(false);
       }
     };
@@ -103,27 +99,51 @@ export default function DialogCustomerSelect({
       document.addEventListener('pointerdown', handlePointerDown);
     }, 0);
 
-    const focusTimer = window.setTimeout(() => {
-      searchInputRef.current?.focus();
-    }, 0);
-
     return () => {
-      window.clearTimeout(timer);
       window.clearTimeout(focusTimer);
+      window.clearTimeout(timer);
       document.removeEventListener('pointerdown', handlePointerDown);
     };
   }, [isOpen]);
 
+  // Dialog scroll-lock blocks wheel on nested lists; scroll the list manually.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!isOpen || !list) return;
+
+    const onWheel = (event: WheelEvent) => {
+      const { scrollTop, scrollHeight, clientHeight } = list;
+      if (scrollHeight <= clientHeight) return;
+
+      event.stopPropagation();
+      event.preventDefault();
+      list.scrollTop = Math.min(
+        Math.max(scrollTop + event.deltaY, 0),
+        scrollHeight - clientHeight
+      );
+    };
+
+    list.addEventListener('wheel', onWheel, { passive: false });
+    return () => list.removeEventListener('wheel', onWheel);
+  }, [isOpen, filteredCustomers.length]);
+
+  const handleSelectCustomer = (customer: Customer) => {
+    const customerName = getCustomerDisplayName(customer);
+    onChange(customerName, customer.CustomerID);
+    onSelectCustomer?.(customer);
+    setIsOpen(false);
+    setSearchQuery("");
+  };
+
   return (
-    <div className="relative w-full" ref={dropdownRef}>
+    <div className="relative w-full" ref={containerRef}>
       <Button
         type="button"
         variant="outline"
+        role="combobox"
+        aria-expanded={isOpen}
         className="w-full justify-between"
-        onClick={(event) => {
-          event.stopPropagation();
-          setIsOpen((prev) => !prev);
-        }}
+        onClick={() => setIsOpen((prev) => !prev)}
       >
         <span className="text-left flex-1 truncate">
           {value || "Select Customer"}
@@ -136,43 +156,31 @@ export default function DialogCustomerSelect({
       </Button>
 
       {isOpen && (
-        <div
-          className="absolute z-[200] w-full mt-1 bg-white rounded-md shadow-lg border border-gray-200"
-          onPointerDown={stopEvent}
-          onMouseDown={stopEvent}
-        >
-          <div className="p-2 border-b" onPointerDown={stopEvent} onMouseDown={stopEvent}>
-            <div
-              className="flex items-center gap-2 px-3 border rounded-md"
-              onPointerDown={stopEvent}
-              onMouseDown={stopEvent}
-            >
-              <Search className="h-4 w-4 text-gray-400 shrink-0" />
+        <div className="mt-2 rounded-md border bg-background shadow-sm">
+          <div className="border-b p-2">
+            <div className="flex items-center gap-2 rounded-md border px-3">
+              <Search className="h-4 w-4 shrink-0 text-gray-400" />
               <Input
                 ref={searchInputRef}
                 type="text"
                 placeholder="Search customers..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                onPointerDown={stopEvent}
-                onMouseDown={stopEvent}
-                onKeyDown={stopEvent}
-                className="border-0 focus-visible:ring-0 focus-visible:ring-offset-0 px-0 h-9"
+                className="h-9 border-0 px-0 focus-visible:ring-0 focus-visible:ring-offset-0"
               />
             </div>
           </div>
 
           <div
-            className="max-h-[220px] overflow-y-auto overscroll-contain touch-pan-y p-1"
-            onPointerDown={stopEvent}
-            onMouseDown={stopEvent}
+            ref={listRef}
+            className="max-h-[240px] overflow-y-auto overscroll-contain touch-pan-y p-1"
           >
             {isLoading ? (
-              <div className="text-center py-2 text-sm text-gray-500">Loading customers...</div>
+              <div className="py-3 text-center text-sm text-gray-500">Loading customers...</div>
             ) : error ? (
-              <div className="text-center py-2 text-sm text-red-500">{error}</div>
+              <div className="py-3 text-center text-sm text-red-500">{error}</div>
             ) : filteredCustomers.length === 0 ? (
-              <div className="text-center py-2 text-sm text-gray-500">No customers found</div>
+              <div className="py-3 text-center text-sm text-gray-500">No customers found</div>
             ) : (
               filteredCustomers.map((customer) => {
                 const customerName = getCustomerDisplayName(customer);
@@ -183,7 +191,7 @@ export default function DialogCustomerSelect({
                     type="button"
                     onClick={() => handleSelectCustomer(customer)}
                     className={cn(
-                      "flex items-center w-full px-3 py-2 text-sm rounded-md hover:bg-gray-100 text-left",
+                      "flex w-full items-center rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100",
                       value === customerName && "bg-gray-100"
                     )}
                   >
@@ -193,7 +201,7 @@ export default function DialogCustomerSelect({
                         value === customerName ? "opacity-100" : "opacity-0"
                       )}
                     />
-                    <span className="flex flex-col min-w-0">
+                    <span className="flex min-w-0 flex-col">
                       <span className="truncate">{customerName}</span>
                       <span className="text-xs text-gray-500">{customerCode}</span>
                     </span>

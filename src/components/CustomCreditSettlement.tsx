@@ -14,6 +14,13 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAuth } from "@/app/auth/auth-context";
 import axios from '@/lib/api/axios';
 import { format } from 'date-fns';
@@ -71,7 +78,7 @@ interface ChequeEntry {
   bank: string;
   realizeDate: string;
   amount: string;
-  chequeStage: 'awaiting' | 'in_hand' | 'floating';
+  chequeStage: 'in_hand' | 'floating';
 }
 
 const createEmptyCheque = (): ChequeEntry => ({
@@ -81,6 +88,25 @@ const createEmptyCheque = (): ChequeEntry => ({
   amount: '',
   chequeStage: 'in_hand',
 });
+
+interface BankAccount {
+  BankAccountID: number;
+  Name: string;
+  BankName?: string | null;
+  AccountNumber?: string | null;
+}
+
+const getPaymentMethodLabel = (method: string) => {
+  switch (method) {
+    case 'BANK_TRANSFER':
+      return 'Bank Transfer';
+    case 'CHEQUE':
+      return 'Cheque';
+    case 'CASH':
+    default:
+      return 'Cash';
+  }
+};
 
 const getTodayDateInputValue = (): string => format(new Date(), 'yyyy-MM-dd');
 
@@ -126,6 +152,9 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [paymentDate, setPaymentDate] = useState(getTodayDateInputValue);
   const [cheques, setCheques] = useState<ChequeEntry[]>([createEmptyCheque()]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [selectedBankAccountId, setSelectedBankAccountId] = useState<string>("");
+  const [loadingBankAccounts, setLoadingBankAccounts] = useState(false);
   const chequeDetails = cheques[0] ?? createEmptyCheque();
   const setChequeDetails = (updater: ChequeEntry | ((prev: ChequeEntry) => ChequeEntry)) => {
     setCheques((prev) => {
@@ -149,12 +178,41 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       setPaymentMethod('CASH');
       setPaymentDate(getTodayDateInputValue());
       setCheques([createEmptyCheque()]);
+      setSelectedBankAccountId("");
       setSelectedItems([]);
       setTotalPaymentAmount("");
       setSuggestedTotalPayment("");
       setDistributionMode('auto');
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const fetchBankAccounts = async () => {
+      const businessLineId = getBusinessLineID();
+      if (!businessLineId) {
+        setBankAccounts([]);
+        return;
+      }
+
+      try {
+        setLoadingBankAccounts(true);
+        const response = await axios.get(
+          `${process.env.NEXT_PUBLIC_API_URL}/cashbook/bank-accounts`,
+          { params: { businessLineId } }
+        );
+        setBankAccounts(Array.isArray(response.data?.data) ? response.data.data : []);
+      } catch (err) {
+        console.error('Error fetching bank accounts:', err);
+        setBankAccounts([]);
+      } finally {
+        setLoadingBankAccounts(false);
+      }
+    };
+
+    fetchBankAccounts();
+  }, [open, getBusinessLineID]);
 
   // Fetch customer's pending credits when selected
   useEffect(() => {
@@ -444,21 +502,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
 
   // Remaining credit after cash, in-hand, and floating (deposited) cheques.
   // Settled cash is already excluded from pending credits.
-  const creditBalance = useMemo(() => {
-    if (!customerCredits) {
-      return 0;
-    }
-
-    const awaitingReceiptTotal = customerCredits.pendingCheques.reduce(
-      (sum, cheque) =>
-        cheque.ReceivedDate || cheque.DepositedDate
-          ? sum
-          : sum + Number(cheque.Amount || 0),
-      0
-    );
-
-    return totalCreditAmount + awaitingReceiptTotal;
-  }, [customerCredits, totalCreditAmount]);
+  const creditBalance = totalCreditAmount;
 
   const hasPendingSettlementItems = Boolean(
     customerCredits &&
@@ -543,31 +587,51 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
       }
 
       const missingChequeDetails = cheques.some(
-        (cheque) => cheque.chequeStage !== 'awaiting' && (!cheque.chequeNumber || !cheque.bank)
+        (cheque) => !cheque.chequeNumber || !cheque.bank
       );
 
       if (missingChequeDetails) {
         toast({
           variant: "destructive",
           title: "Missing Cheque Details",
-          description: "Cheque number and bank are required once the cheque is in hand or deposited.",
+          description: "Cheque number and bank are required for each cheque.",
           duration: 3000,
         });
         return;
       }
 
-      if (cheques.length > 1) {
-        const chequeTotal = cheques.reduce((sum, cheque) => sum + (parseFloat(cheque.amount) || 0), 0);
-        if (Math.abs(chequeTotal - totalSelectedAmount) > 0.01) {
-          toast({
-            variant: "destructive",
-            title: "Cheque Amount Mismatch",
-            description: "The total of all cheque amounts must match the settlement amount.",
-            duration: 3000,
-          });
-          return;
-        }
+      if (cheques.some((cheque) => !cheque.amount || isNaN(parseFloat(cheque.amount)) || parseFloat(cheque.amount) <= 0)) {
+        toast({
+          variant: "destructive",
+          title: "Missing Cheque Amount",
+          description: "Each cheque must include a valid amount.",
+          duration: 3000,
+        });
+        return;
       }
+
+      const chequeTotal = cheques.reduce((sum, cheque) => sum + (parseFloat(cheque.amount) || 0), 0);
+      if (Math.abs(chequeTotal - totalSelectedAmount) > 0.01) {
+        toast({
+          variant: "destructive",
+          title: "Cheque Amount Mismatch",
+          description: "The total of all cheque amounts must match the settlement amount.",
+          duration: 3000,
+        });
+        return;
+      }
+    }
+
+    if (paymentMethod === 'BANK_TRANSFER' && !selectedBankAccountId) {
+      toast({
+        variant: "destructive",
+        title: "Missing Bank Account",
+        description: bankAccounts.length === 0
+          ? "Add a bank account in Cashbook before settling via bank transfer."
+          : "Please select the bank account that received the transfer.",
+        duration: 3000,
+      });
+      return;
     }
     
     setConfirmDialogOpen(true);
@@ -613,11 +677,12 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
           bank: cheque.bank,
           realizeDate: cheque.realizeDate,
           chequeStage: cheque.chequeStage,
-          amount: cheques.length > 1
-            ? parseFloat(cheque.amount)
-            : parseFloat(totalSelectedAmount.toFixed(2)),
+          amount: parseFloat(cheque.amount),
         })),
-      })
+      }),
+      ...(paymentMethod === 'BANK_TRANSFER' && {
+        bankAccountId: Number(selectedBankAccountId),
+      }),
     };
     
     try {
@@ -722,18 +787,28 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-[1000px]">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[85dvh] w-[calc(100%-1.5rem)] flex-col gap-3 overflow-hidden p-4 sm:max-w-[1000px] sm:gap-4 sm:p-6">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Custom Credit Settlement</DialogTitle>
             <DialogDescription>
               Apply a custom payment amount to a customer&apos;s pending credits and opening balances.
             </DialogDescription>
           </DialogHeader>
 
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1">
+          <div className="space-y-2">
+            <Label>Customer</Label>
+            <DialogCustomerSelect
+              value={selectedCustomerName}
+              onChange={handleCustomerChange}
+              onSelectCustomer={handleSelectCustomer}
+            />
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-3">
               <Label>Payment Method</Label>
-              <div className="flex space-x-4">
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
                 <label className="flex items-center space-x-2">
                   <input
                     type="radio"
@@ -752,6 +827,15 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                   />
                   <span>Cheque</span>
                 </label>
+                <label className="flex items-center space-x-2">
+                  <input
+                    type="radio"
+                    value="BANK_TRANSFER"
+                    checked={paymentMethod === 'BANK_TRANSFER'}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                  />
+                  <span>Bank Transfer</span>
+                </label>
               </div>
             </div>
             <div className="space-y-3">
@@ -765,6 +849,45 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
               />
             </div>
           </div>
+
+        {paymentMethod === 'BANK_TRANSFER' && (
+          <div className="space-y-3 border p-3 rounded">
+            <Label htmlFor="settlement-bank-account">Receiving Bank Account</Label>
+            <Select
+              value={selectedBankAccountId || undefined}
+              onValueChange={setSelectedBankAccountId}
+              disabled={loadingBankAccounts || bankAccounts.length === 0}
+            >
+              <SelectTrigger id="settlement-bank-account" className="w-full">
+                <SelectValue
+                  placeholder={
+                    loadingBankAccounts
+                      ? "Loading bank accounts..."
+                      : bankAccounts.length === 0
+                        ? "No bank accounts found"
+                        : "Select bank account"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {bankAccounts.map((account) => (
+                  <SelectItem
+                    key={account.BankAccountID}
+                    value={String(account.BankAccountID)}
+                  >
+                    {account.Name}
+                    {account.AccountNumber ? ` (${account.AccountNumber})` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {bankAccounts.length === 0 && !loadingBankAccounts && (
+              <p className="text-sm text-muted-foreground">
+                Add a bank account in Cashbook first to settle via bank transfer.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Cheque details - show only when CHEQUE is selected */}
         {paymentMethod === 'CHEQUE' && (
@@ -806,24 +929,40 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                   />
                 </div>
               </div>
-              <div>
-                <Label htmlFor="realize-date">Realize Date</Label>
-                <Input
-                  id="realize-date"
-                  type="date"
-                  value={chequeDetails.realizeDate}
-                  onChange={(e) => setChequeDetails(prev => ({
-                    ...prev,
-                    realizeDate: e.target.value
-                  }))}
-                  className="w-full"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="realize-date">Realize Date</Label>
+                  <Input
+                    id="realize-date"
+                    type="date"
+                    value={chequeDetails.realizeDate}
+                    onChange={(e) => setChequeDetails(prev => ({
+                      ...prev,
+                      realizeDate: e.target.value
+                    }))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="cheque-amount">Amount (Rs.)</Label>
+                  <Input
+                    id="cheque-amount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={chequeDetails.amount}
+                    onChange={(e) => setChequeDetails(prev => ({
+                      ...prev,
+                      amount: e.target.value
+                    }))}
+                    placeholder="Enter cheque amount"
+                  />
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Cheque status</Label>
                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                   {([
-                    { value: 'awaiting', label: 'Awaiting receipt' },
                     { value: 'in_hand', label: 'In hand' },
                     { value: 'floating', label: 'Deposited (floating)' },
                   ] as const).map((option) => (
@@ -908,7 +1047,6 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                     <Label>Cheque status</Label>
                     <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                       {([
-                        { value: 'awaiting', label: 'Awaiting receipt' },
                         { value: 'in_hand', label: 'In hand' },
                         { value: 'floating', label: 'Deposited (floating)' },
                       ] as const).map((option) => (
@@ -932,16 +1070,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
             </div>
           )}
           
-          <div className="py-4 space-y-4">
-            {/* Custom Customer Selection */}
-            <div className="space-y-2">
-              <DialogCustomerSelect
-                value={selectedCustomerName}
-                onChange={handleCustomerChange}
-                onSelectCustomer={handleSelectCustomer}
-              />
-            </div>
-            
+          <div className="space-y-4">
             {/* Error Alert */}
             {error && (
               <Alert variant="destructive">
@@ -1004,7 +1133,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                 {hasPendingSettlementItems ? (
                   <>
                 {/* Pending Credits Table */}
-                <div className="max-h-[300px] overflow-x-auto overflow-y-auto">
+                <div className="max-h-[200px] overflow-x-auto overflow-y-auto sm:max-h-[300px]">
                   <h3 className="text-md font-medium mb-2">Pending Credits</h3>
                   <Table className="border min-w-[900px]">
                     <TableHeader className="bg-gray-50">
@@ -1204,12 +1333,12 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
               </div>
             )}
           </div>
+          </div>
           
-          <DialogFooter>
+          <DialogFooter className="shrink-0 border-t pt-3 sm:pt-4">
             <Button
               variant="outline"
               onClick={() => onOpenChange(false)}
-              className="mt-2"
             >
               Cancel
             </Button>
@@ -1224,10 +1353,11 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
                 !paymentDate ||
                 (paymentMethod === 'CHEQUE' &&
                   (!chequeDetails.realizeDate ||
-                    (chequeDetails.chequeStage !== 'awaiting' &&
-                      (!chequeDetails.chequeNumber || !chequeDetails.bank))))
+                    !chequeDetails.chequeNumber ||
+                    !chequeDetails.bank ||
+                    !chequeDetails.amount)) ||
+                (paymentMethod === 'BANK_TRANSFER' && !selectedBankAccountId)
               }
-              className="mt-2"
             >
               Apply Payment
             </Button>
@@ -1243,6 +1373,7 @@ const CustomCreditSettlementDialog: React.FC<CustomCreditSettlementDialogProps> 
             <DialogDescription>
               You are about to settle {formatCurrency(totalSelectedAmount)} 
               {customerCredits && ` for ${customerCredits.customerDetails.CusName}`}
+              {` via ${getPaymentMethodLabel(paymentMethod)}`}
               {paymentDate ? ` on ${paymentDate}` : ''}.
               Items will be settled in the exact order they were selected.
             </DialogDescription>
