@@ -10,11 +10,13 @@ import ProductReport from '@/components/ProductReport';
 import ProfitLossReport from '@/components/ProfitLossReport';
 import { useAuth } from '../auth/auth-context';
 import PaymentsHistory from '@/components/PaymentHistory';
+import InvoiceDateRepair from '@/components/InvoiceDateRepair';
 
 export default function Reports() {
     const [, setActiveTab] = useState("sales");
-    const { getBusinessLineID } = useAuth();
+    const { getBusinessLineID, user } = useAuth();
     const businessLineId = getBusinessLineID() ?? 0;
+    const canRepairDates = ['superuser', 'admin', 'management'].includes(user?.userType ?? '');
 
     return (
         <Card className="w-full mx-auto shadow-lg">
@@ -29,6 +31,7 @@ export default function Reports() {
                     <TabsTrigger value="inventory">Inventory</TabsTrigger>
                     <TabsTrigger value="pnl">P&amp;L</TabsTrigger>
                     <TabsTrigger value="payments">Payments History</TabsTrigger>
+                    {canRepairDates && (<TabsTrigger value="date-repair">Fix Invoice Dates</TabsTrigger>)}
                 </TabsList>
                 <TabsContent value="sales">
                     <SalesTable />
@@ -48,6 +51,11 @@ export default function Reports() {
                 <TabsContent value="payments">
                     <PaymentsHistory />
                 </TabsContent>
+                {canRepairDates && (
+                    <TabsContent value="date-repair">
+                        <InvoiceDateRepair />
+                    </TabsContent>
+                )}
             </Tabs>
         </Card>
     );
