@@ -7,6 +7,7 @@ import { Button } from './ui/button';
 import { useToast } from '@/hooks/use-toast';
 import axios from '@/lib/api/axios';
 import { AxiosError } from 'axios';
+import BankAccountSelect from './BankAccountSelect';
 
 interface PurchasePaymentDetailsProps {
   total: number;
@@ -48,6 +49,8 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
 }) => {
   const [cashAmount, setCashAmount] = useState<number | ''>(0);
   const [creditAmount, setCreditAmount] = useState<number | ''>(0);
+  const [bankAmount, setBankAmount] = useState<number | ''>(0);
+  const [bankAccountId, setBankAccountId] = useState('');
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { toast } = useToast();
@@ -55,28 +58,36 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
   // Calculate payment suggestions
   const paymentSuggestions = useMemo(() => {
     const cashTotal = Number(cashAmount) || 0;
+    const bankTotal = Number(bankAmount) || 0;
     const creditTotal = Number(creditAmount) || 0;
     
-    const afterCash = Math.max(0, total - cashTotal);
+    const afterCashAndBank = Math.max(0, total - cashTotal - bankTotal);
     
     return {
-      suggestedCredit: afterCash,
-      remainingAfterAll: total - cashTotal - creditTotal
+      suggestedCredit: afterCashAndBank,
+      remainingAfterAll: total - cashTotal - bankTotal - creditTotal
     };
-  }, [cashAmount, creditAmount, total]);
+  }, [cashAmount, bankAmount, creditAmount, total]);
 
   const isPaymentValid = useMemo(() => {
     const cashTotal = Number(cashAmount) || 0;
+    const bankTotal = Number(bankAmount) || 0;
     const creditTotal = Number(creditAmount) || 0;    
-    const totalEntered = cashTotal + creditTotal;
+    const totalEntered = cashTotal + bankTotal + creditTotal;
     const isCreditValid = creditTotal === 0 || (creditTotal > 0 && dueDate !== null);
+    const isBankValid = bankTotal === 0 || (bankTotal > 0 && bankAccountId !== '');
     const isPaymentComplete = Math.abs(totalEntered - total) < 0.01;
-    return isPaymentComplete && isCreditValid;
-  }, [cashAmount, creditAmount, dueDate, total]);  
+    return isPaymentComplete && isCreditValid && isBankValid;
+  }, [cashAmount, bankAmount, bankAccountId, creditAmount, dueDate, total]);  
 
   const handleCashAmountChange = (value: string) => {
     const parsedValue = parseFloat(value);
     setCashAmount(!isNaN(parsedValue) ? parsedValue : '');
+  };
+
+  const handleBankAmountChange = (value: string) => {
+    const parsedValue = parseFloat(value);
+    setBankAmount(!isNaN(parsedValue) ? parsedValue : '');
   };
 
   const handleCreditAmountChange = (value: string) => {
@@ -86,6 +97,8 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
 
   const resetForm = () => {
     setCashAmount(0);
+    setBankAmount(0);
+    setBankAccountId('');
     setCreditAmount(0);
     setDueDate(null);
   };
@@ -104,7 +117,7 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
     }
 
     if (!isPaymentValid) {
-      onError?.('Please ensure payment amounts match the total and due date is set for credit payments');
+      onError?.('Please ensure payment amounts match the total, a bank account is chosen for bank payments, and a due date is set for credit payments');
       return;
     }
   
@@ -131,6 +144,9 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
         invoiceNumber,
         invoiceDate: formattedInvoiceDate,
         cashAmount: Number(cashAmount) || 0,
+        bankPayment: (Number(bankAmount) || 0) > 0
+          ? { amount: Number(bankAmount), bankAccountId: Number(bankAccountId) }
+          : null,
         creditPayment: {
           amount: Number(creditAmount) || 0,
           dueDate: formattedDueDate
@@ -209,6 +225,27 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
           />
           <div></div>
 
+          <Label className="text-xs">Bank Amount</Label>
+          <Input
+            type="number"
+            min="0"
+            value={bankAmount}
+            className="w-[240px]"
+            onChange={(e) => handleBankAmountChange(e.target.value)}
+            disabled={isSubmitting}
+          />
+          <div></div>
+
+          <Label className="text-xs">Paid From Account</Label>
+          <BankAccountSelect
+            value={bankAccountId}
+            onChange={setBankAccountId}
+            disabled={isSubmitting || !((Number(bankAmount) || 0) > 0)}
+            placeholder="Select account paid from"
+            className="w-[240px] text-xs"
+          />
+          <div></div>
+
           <Label className="text-xs">Credit Amount</Label>
           <div className="relative">
             <Input
@@ -248,10 +285,12 @@ const PurchasePaymentDetails: React.FC<PurchasePaymentDetailsProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <span>Cash:</span>
               <span>Rs. {(Number(cashAmount) || 0).toFixed(2)}</span>
+              <span>Bank:</span>
+              <span>Rs. {(Number(bankAmount) || 0).toFixed(2)}</span>
               <span>Credit:</span>
               <span>Rs. {(Number(creditAmount) || 0).toFixed(2)}</span>
               <span className="font-medium">Total Entered:</span>
-              <span className="font-medium">Rs. {((Number(cashAmount) || 0) + (Number(creditAmount) || 0)).toFixed(2)}</span>
+              <span className="font-medium">Rs. {((Number(cashAmount) || 0) + (Number(bankAmount) || 0) + (Number(creditAmount) || 0)).toFixed(2)}</span>
               {Math.abs(paymentSuggestions.remainingAfterAll) > 0.01 && (
                 <>
                   <span className={paymentSuggestions.remainingAfterAll > 0 ? "text-red-600" : "text-green-600"}>

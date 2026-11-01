@@ -28,6 +28,7 @@ import { useAuth } from '../auth/auth-context';
 import axios from '@/lib/api/axios';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { DatePickerWithRange } from '@/components/DateRange';
+import BankAccountSelect from '@/components/BankAccountSelect';
 import { format } from 'date-fns';
 import { AxiosError } from 'axios';
 import { toast } from '@/hooks/use-toast';
@@ -44,6 +45,8 @@ interface Cheque {
   RealizeDate: string;
   ReceivedDate?: string | null;
   DepositedDate?: string | null;
+  DepositBankAccountID?: number | null;
+  DepositBankAccountName?: string | null;
   Amount: number;
   CustomerName: string;
   CustomerID: number;
@@ -167,6 +170,7 @@ interface MarkDepositedDialogState {
   isOpen: boolean;
   cheque: Cheque | null;
   depositedDate: string;
+  bankAccountId: string;
 }
 
 const PaymentManagement = () => {
@@ -280,6 +284,7 @@ const PaymentManagement = () => {
     isOpen: false,
     cheque: null,
     depositedDate: format(new Date(), 'yyyy-MM-dd'),
+    bankAccountId: '',
   });
 
   const fetchCustomers = useCallback(async () => {
@@ -633,6 +638,7 @@ const PaymentManagement = () => {
       isOpen: true,
       cheque,
       depositedDate: format(new Date(), 'yyyy-MM-dd'),
+      bankAccountId: '',
     });
   };
 
@@ -641,14 +647,14 @@ const PaymentManagement = () => {
   };
 
   const handleMarkChequeDeposited = async () => {
-    const { cheque, depositedDate } = markDepositedDialog;
-    if (!cheque) return;
+    const { cheque, depositedDate, bankAccountId } = markDepositedDialog;
+    if (!cheque || !bankAccountId) return;
 
     try {
       setProcessingIds((prev) => new Set(prev).add(cheque.ChequePaymentID));
       await axios.put(
         `${process.env.NEXT_PUBLIC_API_URL}/payments/cheque/${cheque.ChequePaymentID}/deposit`,
-        { depositedDate }
+        { depositedDate, bankAccountId: Number(bankAccountId) }
       );
       closeMarkDepositedDialog();
       await fetchPendingPayments();
@@ -1227,6 +1233,7 @@ const PaymentManagement = () => {
                       <TableHead className="text-black w-40 font-bold">Cheque #</TableHead>
                       <TableHead className="text-black font-bold">Customer</TableHead>
                       <TableHead className="text-black font-bold">Deposited</TableHead>
+                      <TableHead className="text-black font-bold">Deposited To</TableHead>
                       <TableHead className="text-black font-bold">Realize Date</TableHead>
                       <TableHead className="text-black font-bold">Bank</TableHead>
                       <TableHead className="text-black font-bold text-right">Amount</TableHead>
@@ -1244,6 +1251,7 @@ const PaymentManagement = () => {
                           ? format(new Date(cheque.DepositedDate), 'yyyy-MM-dd')
                           : '—'}
                       </TableCell>
+                      <TableCell>{cheque.DepositBankAccountName || '—'}</TableCell>
                       <TableCell>
                         {format(new Date(cheque.RealizeDate), 'yyyy-MM-dd')}
                       </TableCell>
@@ -1294,7 +1302,7 @@ const PaymentManagement = () => {
                   ))}
                   {floatingCheques.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-4">
+                      <TableCell colSpan={9} className="text-center py-4">
                         No floating cheques
                       </TableCell>
                     </TableRow>
@@ -1455,12 +1463,25 @@ const PaymentManagement = () => {
                 }
               />
             </div>
+            <div>
+              <Label>Deposited to account</Label>
+              <BankAccountSelect
+                value={markDepositedDialog.bankAccountId}
+                onChange={(value) =>
+                  setMarkDepositedDialog((prev) => ({ ...prev, bankAccountId: value }))
+                }
+                placeholder="Select deposit bank account"
+              />
+            </div>
           </div>
           <DialogFooter className="mt-4 gap-2">
             <Button variant="outline" onClick={closeMarkDepositedDialog}>
               Cancel
             </Button>
-            <Button onClick={handleMarkChequeDeposited}>
+            <Button
+              onClick={handleMarkChequeDeposited}
+              disabled={!markDepositedDialog.bankAccountId || !markDepositedDialog.depositedDate}
+            >
               Mark deposited
             </Button>
           </DialogFooter>

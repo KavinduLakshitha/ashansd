@@ -246,7 +246,7 @@ export default function CashbookPage() {
 
   const [transferForm, setTransferForm] = useState({
     entryDate: format(new Date(), "yyyy-MM-dd"),
-    transferType: "CASH_TO_BANK" as "CASH_TO_BANK" | "BANK_TO_BANK",
+    transferType: "CASH_TO_BANK" as "CASH_TO_BANK" | "BANK_TO_BANK" | "BANK_TO_CASH",
     amount: "",
     fromBankAccountId: "",
     toBankAccountId: "",
@@ -861,7 +861,7 @@ export default function CashbookPage() {
       return;
     }
 
-    if (!transferForm.toBankAccountId) {
+    if (transferForm.transferType !== "BANK_TO_CASH" && !transferForm.toBankAccountId) {
       toast({
         title: "Destination required",
         description: "Select the destination bank account.",
@@ -870,7 +870,7 @@ export default function CashbookPage() {
       return;
     }
 
-    if (transferForm.transferType === "BANK_TO_BANK") {
+    if (transferForm.transferType !== "CASH_TO_BANK") {
       if (!transferForm.fromBankAccountId) {
         toast({
           title: "Source required",
@@ -879,7 +879,10 @@ export default function CashbookPage() {
         });
         return;
       }
-      if (transferForm.fromBankAccountId === transferForm.toBankAccountId) {
+      if (
+        transferForm.transferType === "BANK_TO_BANK" &&
+        transferForm.fromBankAccountId === transferForm.toBankAccountId
+      ) {
         toast({
           title: "Invalid accounts",
           description: "Source and destination bank accounts must be different.",
@@ -897,10 +900,13 @@ export default function CashbookPage() {
         amount,
         transferType: transferForm.transferType,
         fromBankAccountId:
-          transferForm.transferType === "BANK_TO_BANK"
+          transferForm.transferType !== "CASH_TO_BANK"
             ? Number(transferForm.fromBankAccountId)
             : undefined,
-        toBankAccountId: Number(transferForm.toBankAccountId),
+        toBankAccountId:
+          transferForm.transferType !== "BANK_TO_CASH"
+            ? Number(transferForm.toBankAccountId)
+            : undefined,
         description: transferForm.description || undefined,
       });
       toast({
@@ -908,7 +914,9 @@ export default function CashbookPage() {
         description:
           transferForm.transferType === "CASH_TO_BANK"
             ? "Cash moved to bank account."
-            : "Funds moved between bank accounts.",
+            : transferForm.transferType === "BANK_TO_CASH"
+              ? "Bank funds moved to cash."
+              : "Funds moved between bank accounts.",
       });
       setTransferOpen(false);
       await fetchData();
@@ -1789,9 +1797,11 @@ export default function CashbookPage() {
                 onValueChange={(value) =>
                   setTransferForm((prev) => ({
                     ...prev,
-                    transferType: value as "CASH_TO_BANK" | "BANK_TO_BANK",
+                    transferType: value as "CASH_TO_BANK" | "BANK_TO_BANK" | "BANK_TO_CASH",
                     fromBankAccountId:
                       value === "CASH_TO_BANK" ? "" : prev.fromBankAccountId,
+                    toBankAccountId:
+                      value === "BANK_TO_CASH" ? "" : prev.toBankAccountId,
                   }))
                 }
               >
@@ -1801,10 +1811,11 @@ export default function CashbookPage() {
                 <SelectContent>
                   <SelectItem value="CASH_TO_BANK">Cash → Bank</SelectItem>
                   <SelectItem value="BANK_TO_BANK">Bank → Bank</SelectItem>
+                  <SelectItem value="BANK_TO_CASH">Bank → Cash</SelectItem>
                 </SelectContent>
               </Select>
             </div>
-            {transferForm.transferType === "BANK_TO_BANK" && (
+            {transferForm.transferType !== "CASH_TO_BANK" && (
               <div>
                 <Label>From bank account</Label>
                 <Select
@@ -1839,6 +1850,7 @@ export default function CashbookPage() {
                 </Select>
               </div>
             )}
+            {transferForm.transferType !== "BANK_TO_CASH" && (
             <div>
               <Label>To bank account</Label>
               <Select
@@ -1878,6 +1890,7 @@ export default function CashbookPage() {
                 </SelectContent>
               </Select>
             </div>
+            )}
             <div>
               <Label htmlFor="tr-amount">Amount (Rs.)</Label>
               <Input

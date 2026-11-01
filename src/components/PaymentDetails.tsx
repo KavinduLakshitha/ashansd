@@ -486,6 +486,7 @@ import { X } from 'lucide-react';
 import axios from '@/lib/api/axios';
 import { isAxiosError } from 'axios';
 import { Checkbox } from '@/components/ui/checkbox';
+import BankAccountSelect from './BankAccountSelect';
 
 interface ChequeDetails {
   amount: number | '';
@@ -525,6 +526,8 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
   const [cashAmount, setCashAmount] = useState<number | ''>(0);
   const [cheques, setCheques] = useState<ChequeDetails[]>([]);
   const [creditAmount, setCreditAmount] = useState<number | ''>(0);
+  const [bankAmount, setBankAmount] = useState<number | ''>(0);
+  const [bankAccountId, setBankAccountId] = useState('');
   const [dueDate, setDueDate] = useState<Date | null>(null);
   const [sendSMS, setSendSMS] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -539,6 +542,8 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
     setCashAmount(0);
     setCheques([]);
     setCreditAmount(0);
+    setBankAmount(0);
+    setBankAccountId('');
     setDueDate(null);
     setSendSMS(false);
     setCustomInvoiceNumber(''); // Reset custom invoice number
@@ -562,25 +567,27 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
   // Calculate remaining amounts for suggestions
   const paymentSuggestions = useMemo(() => {
     const cashTotal = Number(cashAmount) || 0;
+    const bankTotal = Number(bankAmount) || 0;
     const chequeTotal = getTotalChequeAmount();
     const creditTotal = Number(creditAmount) || 0;
     
-    const afterCash = Math.max(0, totalPayableAmount - cashTotal);
-    const afterCashAndCredit = Math.max(0, totalPayableAmount - cashTotal - creditTotal);
+    const afterCash = Math.max(0, totalPayableAmount - cashTotal - bankTotal);
+    const afterCashAndCredit = Math.max(0, totalPayableAmount - cashTotal - bankTotal - creditTotal);
     
     return {
       suggestedCredit: afterCash,
       suggestedCheque: afterCashAndCredit,
-      remainingAfterAll: totalPayableAmount - cashTotal - chequeTotal - creditTotal
+      remainingAfterAll: totalPayableAmount - cashTotal - bankTotal - chequeTotal - creditTotal
     };
-  }, [cashAmount, creditAmount, getTotalChequeAmount, totalPayableAmount]);
+  }, [cashAmount, bankAmount, creditAmount, getTotalChequeAmount, totalPayableAmount]);
 
   const isPaymentValid = useMemo(() => {
     const cashTotal = Number(cashAmount) || 0;
+    const bankTotal = Number(bankAmount) || 0;
     const chequeTotal = getTotalChequeAmount();
     const creditTotal = Number(creditAmount) || 0;    
 
-    const totalEntered = cashTotal + chequeTotal + creditTotal;
+    const totalEntered = cashTotal + bankTotal + chequeTotal + creditTotal;
     
     const areChequeDetailsValid = cheques.length === 0 || !cheques.some(cheque => {
       if (!cheque.amount || !cheque.realizeDate) {
@@ -596,10 +603,12 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
     
     const isCreditValid = creditTotal === 0 || (creditTotal > 0 && dueDate !== null);
     
+    const isBankValid = bankTotal === 0 || (bankTotal > 0 && bankAccountId !== '');
+    
     const isPaymentComplete = Math.abs(totalEntered - totalPayableAmount) < 0.01;
     
-    return isPaymentComplete && areChequeDetailsValid && isCreditValid;
-  }, [cashAmount, cheques, creditAmount, dueDate, totalPayableAmount, getTotalChequeAmount]);
+    return isPaymentComplete && areChequeDetailsValid && isCreditValid && isBankValid;
+  }, [cashAmount, bankAmount, bankAccountId, cheques, creditAmount, dueDate, totalPayableAmount, getTotalChequeAmount]);
 
   const handleInputChange = (
     value: string,
@@ -613,9 +622,10 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
     if (setter === setDiscount) {
       const newPayableAmount = total - (parsedValue || 0);
       const cashTotal = Number(cashAmount) || 0;
+      const bankTotal = Number(bankAmount) || 0;
       const creditTotal = Number(creditAmount) || 0;
       const chequeTotal = getTotalChequeAmount();
-      const currentTotalPayment = cashTotal + creditTotal + chequeTotal;
+      const currentTotalPayment = cashTotal + bankTotal + creditTotal + chequeTotal;
       
       // Check if payment was previously balanced
       const wasBalanced = Math.abs(currentTotalPayment - totalPayableAmount) < 0.01;
@@ -644,6 +654,11 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
   const handleCreditAmountChange = (value: string) => {
     const parsedValue = parseFloat(value);
     setCreditAmount(!isNaN(parsedValue) ? parsedValue : '');
+  };
+
+  const handleBankAmountChange = (value: string) => {
+    const parsedValue = parseFloat(value);
+    setBankAmount(!isNaN(parsedValue) ? parsedValue : '');
   };
 
   const addCheque = () => {
@@ -743,6 +758,9 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
           discount: discount,
           cashAmount,
           chequePayments,
+          bankPayment: (Number(bankAmount) || 0) > 0
+            ? { amount: Number(bankAmount), bankAccountId: Number(bankAccountId) }
+            : null,
           creditPayment: {
             amount: creditAmount,
             dueDate
@@ -822,6 +840,26 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
             value={cashAmount}
             className="w-[240px]"
             onChange={(e) => handleCashAmountChange(e.target.value)}
+          />
+          <div></div>
+
+          <Label className='text-xs'>Bank Amount</Label>
+          <Input
+            type="number"
+            min="0"
+            value={bankAmount}
+            className="w-[240px]"
+            onChange={(e) => handleBankAmountChange(e.target.value)}
+          />
+          <div></div>
+
+          <Label className='text-xs'>Received In Account</Label>
+          <BankAccountSelect
+            value={bankAccountId}
+            onChange={setBankAccountId}
+            disabled={!((Number(bankAmount) || 0) > 0)}
+            placeholder="Select account received in"
+            className="w-[240px] text-xs"
           />
           <div></div>
 
@@ -957,12 +995,14 @@ const PaymentDetails: React.FC<PaymentDetailsProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <span>Cash:</span>
               <span>Rs. {(Number(cashAmount) || 0).toFixed(2)}</span>
+              <span>Bank:</span>
+              <span>Rs. {(Number(bankAmount) || 0).toFixed(2)}</span>
               <span>Cheques:</span>
               <span>Rs. {getTotalChequeAmount().toFixed(2)}</span>
               <span>Credit:</span>
               <span>Rs. {(Number(creditAmount) || 0).toFixed(2)}</span>
               <span className="font-medium">Total Entered:</span>
-              <span className="font-medium">Rs. {((Number(cashAmount) || 0) + getTotalChequeAmount() + (Number(creditAmount) || 0)).toFixed(2)}</span>
+              <span className="font-medium">Rs. {((Number(cashAmount) || 0) + (Number(bankAmount) || 0) + getTotalChequeAmount() + (Number(creditAmount) || 0)).toFixed(2)}</span>
               {Math.abs(paymentSuggestions.remainingAfterAll) > 0.01 && (
                 <>
                   <span className={paymentSuggestions.remainingAfterAll > 0 ? "text-red-600" : "text-green-600"}>

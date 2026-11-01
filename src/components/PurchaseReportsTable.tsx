@@ -19,6 +19,9 @@ import { Trash2, AlertTriangle } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import _ from 'lodash';
+import { Label } from "@/components/ui/label";
+import { toast } from '@/hooks/use-toast';
+import BankAccountSelect from './BankAccountSelect';
 
 interface Vendor {
   VendorName: string;
@@ -28,6 +31,7 @@ interface Vendor {
 interface PaymentDetails {
   dueDate?: string;
   status?: string;
+  settledDate?: string | null;
 }
 
 interface PurchaseItem {
@@ -44,7 +48,7 @@ interface Purchase {
   VendorID: string;
   VendorName: string;
   PaymentID: string;
-  PaymentMethod: 'CASH' | 'CREDIT';
+  PaymentMethod: 'CASH' | 'CREDIT' | 'BANK_TRANSFER';
   Amount: number;
   PurchaseDate: string;
   InvoiceDate: string;
@@ -89,6 +93,19 @@ const PurchaseReportsTable = () => {
     open: false,
     purchaseId: '',
     invoiceNumber: '',
+    loading: false
+  });
+
+  const [payDialog, setPayDialog] = useState({
+    open: false,
+    paymentId: '',
+    invoiceNumber: '',
+    vendorName: '',
+    outstanding: 0,
+    amount: '',
+    method: 'CASH' as 'CASH' | 'BANK_TRANSFER',
+    bankAccountId: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
     loading: false
   });
 
@@ -150,6 +167,70 @@ const PurchaseReportsTable = () => {
 
     fetchInitialData();
   }, [getBusinessLineID, filters.dateRange]);
+
+  // Reloads the purchase list, keeping any items already loaded for expanded invoices.
+  const refreshPurchases = async () => {
+    const businessLineId = getBusinessLineID();
+    const { startDate, endDate } = adjustDateRange(filters.dateRange);
+    const response = await axios.get(
+      `${process.env.NEXT_PUBLIC_API_URL}/purchases/history/${businessLineId}`,
+      { params: { startDate, endDate } }
+    );
+    setPurchases(prev => {
+      const itemsByPurchase = new Map(prev.filter(p => p.items).map(p => [p.PurchaseID, p.items]));
+      return (response.data as Purchase[]).map(p => ({ ...p, items: itemsByPurchase.get(p.PurchaseID) }));
+    });
+  };
+
+  const openPayDialog = (purchase: Purchase) => {
+    setPayDialog({
+      open: true,
+      paymentId: purchase.PaymentID,
+      invoiceNumber: purchase.InvoiceNumber,
+      vendorName: purchase.VendorName,
+      outstanding: Number(purchase.Amount),
+      amount: Number(purchase.Amount).toFixed(2),
+      method: 'CASH',
+      bankAccountId: '',
+      date: format(new Date(), 'yyyy-MM-dd'),
+      loading: false
+    });
+  };
+
+  const payAmountValue = Number(payDialog.amount);
+  const payIsValid =
+    payAmountValue > 0 &&
+    payAmountValue - payDialog.outstanding <= 0.009 &&
+    !!payDialog.date &&
+    (payDialog.method === 'CASH' || payDialog.bankAccountId !== '');
+
+  const confirmPayCredit = async () => {
+    if (!payIsValid) return;
+    setPayDialog(prev => ({ ...prev, loading: true }));
+    try {
+      const response = await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/purchases/credits/${payDialog.paymentId}/settle`,
+        {
+          amount: payAmountValue,
+          paymentMethod: payDialog.method,
+          bankAccountId: payDialog.method === 'BANK_TRANSFER' ? Number(payDialog.bankAccountId) : undefined,
+          settledDate: payDialog.date
+        }
+      );
+      toast({ title: 'Payment recorded', description: response.data?.message ?? 'Purchase credit paid' });
+      setPayDialog(prev => ({ ...prev, open: false, loading: false }));
+      await refreshPurchases();
+    } catch (error) {
+      setPayDialog(prev => ({ ...prev, loading: false }));
+      toast({
+        title: 'Error',
+        description: isAxiosError(error)
+          ? error.response?.data?.message || 'Failed to record payment'
+          : 'Failed to record payment',
+        variant: 'destructive'
+      });
+    }
+  };
 
   const handleDeletePurchase = async (purchaseId: string, invoiceNumber: string) => {
     setDeleteDialog({
@@ -994,6 +1075,7 @@ const PurchaseReportsTable = () => {
     
     switch (purchase.PaymentMethod) {
       case 'CASH':
+      case 'BANK_TRANSFER':
         return {
           text: 'PAID',
           className: 'bg-green-100 text-green-800'
@@ -1108,6 +1190,7 @@ const PurchaseReportsTable = () => {
               <SelectContent>
                 <SelectItem value="ALL">All Payments</SelectItem>
                 <SelectItem value="CASH">Cash</SelectItem>
+                <SelectItem value="BANK_TRANSFER">Bank</SelectItem>
                 <SelectItem value="CREDIT">Credit</SelectItem>
               </SelectContent>
             </Select>
@@ -1314,6 +1397,7 @@ const PurchaseReportsTable = () => {
                                         <TableCell className="font-medium">Amount</TableCell>
                                         <TableCell className="font-medium">Status</TableCell>
                                         <TableCell className="font-medium">Details</TableCell>
+                                        <TableCell className="font-medium text-right">Action</TableCell>
                                       </TableRow>
                                     </TableHeader>
                                     <TableBody>
@@ -1333,6 +1417,20 @@ const PurchaseReportsTable = () => {
                                                 <>Due: {new Date(purchase.paymentDetails.dueDate).toLocaleDateString()}</>
                                               )}
                                               {purchase.PaymentMethod === 'CASH' && 'Paid in Cash'}
+                                              {purchase.PaymentMethod === 'BANK_TRANSFER' && 'Paid by Bank'}
+                                            </TableCell>
+                                            <TableCell className="text-right">
+                                              {purchase.PaymentMethod === 'CREDIT' && status.text === 'PENDING' && (
+                                                <Button
+                                                  size="sm"
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    openPayDialog(purchase);
+                                                  }}
+                                                >
+                                                  Pay
+                                                </Button>
+                                              )}
                                             </TableCell>
                                           </TableRow>
                                         );
@@ -1393,6 +1491,98 @@ const PurchaseReportsTable = () => {
             </TableBody>
           </Table>
         </div>
+
+        <Dialog open={payDialog.open} onOpenChange={(open) => !payDialog.loading && setPayDialog(prev => ({ ...prev, open }))}>
+          <DialogContent className="sm:max-w-[440px]">
+            <DialogHeader>
+              <DialogTitle>Pay Purchase Credit</DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="bg-gray-50 p-3 rounded-lg text-sm space-y-1">
+                <p><span className="font-medium">Invoice:</span> {payDialog.invoiceNumber}</p>
+                <p><span className="font-medium">Vendor:</span> {payDialog.vendorName}</p>
+                <p><span className="font-medium">Outstanding:</span> {formatCurrency(payDialog.outstanding)}</p>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Pay with</Label>
+                <Select
+                  value={payDialog.method}
+                  onValueChange={(value) => setPayDialog(prev => ({
+                    ...prev,
+                    method: value as 'CASH' | 'BANK_TRANSFER',
+                    bankAccountId: value === 'CASH' ? '' : prev.bankAccountId
+                  }))}
+                  disabled={payDialog.loading}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CASH">Cash</SelectItem>
+                    <SelectItem value="BANK_TRANSFER">Bank</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {payDialog.method === 'BANK_TRANSFER' && (
+                <div className="space-y-1">
+                  <Label className="text-xs">Paid from account</Label>
+                  <BankAccountSelect
+                    value={payDialog.bankAccountId}
+                    onChange={(value) => setPayDialog(prev => ({ ...prev, bankAccountId: value }))}
+                    disabled={payDialog.loading}
+                  />
+                </div>
+              )}
+
+              <div className="space-y-1">
+                <Label className="text-xs">Amount (Rs.)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={payDialog.amount}
+                  onChange={(e) => setPayDialog(prev => ({ ...prev, amount: e.target.value }))}
+                  disabled={payDialog.loading}
+                />
+                {payAmountValue - payDialog.outstanding > 0.009 && (
+                  <p className="text-xs text-red-600">Amount can&apos;t be more than the outstanding credit.</p>
+                )}
+                {payAmountValue > 0 && payDialog.outstanding - payAmountValue > 0.009 && (
+                  <p className="text-xs text-gray-500">
+                    Part payment: {formatCurrency(payDialog.outstanding - payAmountValue)} will stay pending.
+                  </p>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs">Payment date</Label>
+                <Input
+                  type="date"
+                  value={payDialog.date}
+                  onChange={(e) => setPayDialog(prev => ({ ...prev, date: e.target.value }))}
+                  disabled={payDialog.loading}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setPayDialog(prev => ({ ...prev, open: false }))}
+                disabled={payDialog.loading}
+              >
+                Cancel
+              </Button>
+              <Button type="button" onClick={confirmPayCredit} disabled={!payIsValid || payDialog.loading}>
+                {payDialog.loading ? 'Saving…' : 'Record Payment'}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={deleteDialog.open} onOpenChange={(open) => !deleteDialog.loading && setDeleteDialog(prev => ({ ...prev, open }))}>
           <DialogContent className="sm:max-w-[425px]">

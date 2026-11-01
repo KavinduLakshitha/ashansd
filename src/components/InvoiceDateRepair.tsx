@@ -53,6 +53,7 @@ export default function InvoiceDateRepair() {
   const [loading, setLoading] = useState(true);
   const [fixing, setFixing] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -63,11 +64,15 @@ export default function InvoiceDateRepair() {
         const response = await axios.get('/payments/date-mismatches');
         if (cancelled) return;
         const mismatches: DateMismatch[] = response.data?.mismatches ?? [];
+        setLoadFailed(false);
         setRows(mismatches);
         // Pre-select everything except bounced-cheque credits, which are dated on purpose.
         setSelected(new Set(mismatches.filter((m) => !m.FromBouncedCheque).map((m) => m.PaymentID)));
       } catch (error) {
         if (cancelled) return;
+        setLoadFailed(true);
+        setRows([]);
+        setSelected(new Set());
         toast({
           title: 'Error',
           description: errorMessage(error, 'Could not load moved invoice dates'),
@@ -146,7 +151,9 @@ export default function InvoiceDateRepair() {
         <div className="text-sm text-gray-600">
           {loading
             ? 'Checking…'
-            : rows.length === 0
+            : loadFailed
+              ? 'Could not load the list. Click Refresh to try again.'
+              : rows.length === 0
               ? 'No moved invoice dates found.'
               : `${rows.length} payment${rows.length === 1 ? '' : 's'} on ${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'} · ${selected.size} selected`}
         </div>
