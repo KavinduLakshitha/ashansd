@@ -151,7 +151,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
       setError(null);
       try {
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_API_URL}/inventory/levels/${businessLineId}?asOfDate=${asOfDate.toISOString()}`,
+          `${process.env.NEXT_PUBLIC_API_URL}/inventory/levels/${businessLineId}?asOfDate=${format(asOfDate, 'yyyy-MM-dd')}`,
           {
             headers: {
               'Authorization': `Bearer ${localStorage.getItem('token')}`
