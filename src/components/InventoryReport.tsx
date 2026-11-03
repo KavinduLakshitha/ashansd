@@ -1103,7 +1103,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                   maximumFractionDigits: 0,
                 }).format(totalValue)}
               </div>
-              <p className="text-xs text-muted-foreground">Current qty × average cost</p>
+              <p className="text-xs text-muted-foreground">Current qty × last purchase price</p>
             </CardContent>
           </Card>
                       
