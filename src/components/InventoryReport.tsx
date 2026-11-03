@@ -166,7 +166,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
         const data = await response.json() as Product[];
         setProducts(data);
         setTotalItems(data.length);
-        setTotalValue(data.reduce((sum, item) => sum + (item.Value || item.CurrentQTY * (item.AverageCost || 0)), 0));
+        setTotalValue(data.reduce((sum, item) => sum + (item.Value || item.CurrentQTY * (item.LastPurchasePrice || item.AverageCost || 0)), 0));
         setLowStockItems(data.filter(item => item.Status === 'Low Stock' || 
           (item.CurrentQTY < item.MinimumQTY)).length);
       } catch (error) {
@@ -367,7 +367,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
       
       let totalValue = 0;
       filteredProducts.forEach(product => {
-        const value = product.Value || product.CurrentQTY * (product.AverageCost || 0);
+        const value = product.Value || product.CurrentQTY * (product.LastPurchasePrice || product.AverageCost || 0);
         totalValue += value;
         
         inventoryData.push([
@@ -1222,7 +1222,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                                 {new Intl.NumberFormat('en-US', {
                                   style: 'currency',
                                   currency: 'LKR'
-                                }).format(product.Value || product.CurrentQTY * (product.AverageCost || 0))}
+                                }).format(product.Value || product.CurrentQTY * (product.LastPurchasePrice || product.AverageCost || 0))}
                               </TableCell>
                               <TableCell className="text-sm text-muted-foreground">
                                 {product.LastUpdated ? format(new Date(product.LastUpdated), 'MMM d, yyyy') : 'N/A'}
