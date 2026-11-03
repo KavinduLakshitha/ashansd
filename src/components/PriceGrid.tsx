@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Edit, Trash, Plus, AlertTriangle } from "lucide-react";
+import { Edit, Trash, Plus, AlertTriangle, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/app/auth/auth-context";
 import { isAxiosError } from "axios";
@@ -26,6 +26,8 @@ interface Vendor {
   VendorName: string;
 }
 
+type SortKey = "id" | "name" | "vendors" | "qty";
+
 interface Product {
   ProductID: number;
   Name: string;
@@ -46,6 +48,10 @@ const ProductsInventory: React.FC = () => {
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | undefined>(undefined);
   
+  // Sorting (null = server order)
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
   // State for delete confirmation dialog
   const [deleteDialogOpen, setDeleteDialogOpen] = useState<boolean>(false);
   const [productToDelete, setProductToDelete] = useState<number | number[] | null>(null);
@@ -67,6 +73,58 @@ const ProductsInventory: React.FC = () => {
     );
     setFilteredProducts(filtered);
   }, [searchQuery, products]);
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((dir) => (dir === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedProducts = useMemo(() => {
+    if (!sortKey) return filteredProducts;
+    const vendorText = (p: Product) =>
+      (p.Vendors ?? []).map((v) => v.VendorName).join(", ").toLowerCase();
+    const sorted = [...filteredProducts].sort((a, b) => {
+      switch (sortKey) {
+        case "id":
+          return Number(a.ProductID) - Number(b.ProductID);
+        case "name":
+          return a.Name.localeCompare(b.Name, undefined, { sensitivity: "base", numeric: true });
+        case "vendors": {
+          // Products without vendors go last when ascending
+          const va = vendorText(a);
+          const vb = vendorText(b);
+          if (!va && vb) return 1;
+          if (va && !vb) return -1;
+          return va.localeCompare(vb, undefined, { numeric: true });
+        }
+        case "qty":
+          return Number(a.CurrentQTY) - Number(b.CurrentQTY);
+      }
+    });
+    return sortDir === "asc" ? sorted : sorted.reverse();
+  }, [filteredProducts, sortKey, sortDir]);
+
+  // Plain render helper (not a component) so it isn't re-created as a new component type each render
+  const renderSortHead = (label: string, column: SortKey, className?: string) => {
+    const active = sortKey === column;
+    const Icon = !active ? ArrowUpDown : sortDir === "asc" ? ArrowUp : ArrowDown;
+    return (
+      <TableHead key={column} className={className} aria-sort={active ? (sortDir === "asc" ? "ascending" : "descending") : "none"}>
+        <button
+          type="button"
+          onClick={() => toggleSort(column)}
+          className={`inline-flex items-center gap-1 font-medium hover:text-gray-900 ${className?.includes("text-right") ? "flex-row-reverse" : ""}`}
+        >
+          {label}
+          <Icon className={`h-3.5 w-3.5 ${active ? "text-gray-900" : "text-gray-400"}`} />
+        </button>
+      </TableHead>
+    );
+  };
 
   const handleApiError = useCallback((error: unknown, defaultMessage: string) => {
     if (isAxiosError(error)) {
@@ -280,10 +338,10 @@ const ProductsInventory: React.FC = () => {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Product ID</TableHead>
-            <TableHead>Name</TableHead>
-            <TableHead>Vendors</TableHead>
-            <TableHead className="text-right">Current QTY</TableHead>
+            {renderSortHead("Product ID", "id")}
+            {renderSortHead("Name", "name")}
+            {renderSortHead("Vendors", "vendors")}
+            {renderSortHead("Current QTY", "qty", "text-right")}
             <TableHead className="text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
@@ -299,7 +357,7 @@ const ProductsInventory: React.FC = () => {
               </TableCell>
             </TableRow>
           ) : (
-            filteredProducts.map(product => (
+            sortedProducts.map(product => (
               <TableRow key={product.ProductID}>
                 <TableCell>{product.ProductID}</TableCell>
                 <TableCell>{product.Name}</TableCell>

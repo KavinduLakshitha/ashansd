@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileDown, RefreshCw } from 'lucide-react';
+import { FileDown, RefreshCw, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
 import { format } from 'date-fns';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, } from '@/components/ui/table';
@@ -76,6 +76,55 @@ interface InventoryReportProps {
   initialDate?: Date;
 }
 
+type SortDir = 'asc' | 'desc';
+type SortState<K extends string> = { key: K; dir: SortDir } | null;
+type ProductSortKey = 'id' | 'name' | 'qty' | 'minQty' | 'profit' | 'status' | 'value' | 'updated';
+type MovementSortKey = 'date' | 'product' | 'type' | 'reference' | 'quantity' | 'direction' | 'user' | 'details';
+
+// Sort helper: values that are null/undefined always go last, whichever direction is chosen.
+function sortRows<T>(rows: T[], getValue: (row: T) => string | number | null | undefined, dir: SortDir): T[] {
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  const factor = dir === 'asc' ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const va = getValue(a);
+    const vb = getValue(b);
+    const aMissing = va === null || va === undefined || va === '';
+    const bMissing = vb === null || vb === undefined || vb === '';
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;
+    if (bMissing) return -1;
+    if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * factor;
+    return collator.compare(String(va), String(vb)) * factor;
+  });
+}
+
+// Clickable column heading: click once for ascending, again for descending.
+function SortHead<K extends string>({
+  label, column, sort, onSort, className,
+}: {
+  label: string;
+  column: K;
+  sort: SortState<K>;
+  onSort: (key: K) => void;
+  className?: string;
+}) {
+  const active = sort?.key === column;
+  const Icon = !active ? ArrowUpDown : sort?.dir === 'asc' ? ArrowUp : ArrowDown;
+  const rightAligned = className?.includes('text-right');
+  return (
+    <TableHead className={className} aria-sort={active ? (sort?.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+      <button
+        type="button"
+        onClick={() => onSort(column)}
+        className={`inline-flex items-center gap-1 font-medium hover:text-foreground ${rightAligned ? 'flex-row-reverse' : ''}`}
+      >
+        {label}
+        <Icon className={`h-3.5 w-3.5 ${active ? 'text-foreground' : 'text-muted-foreground/60'}`} />
+      </button>
+    </TableHead>
+  );
+}
+
 const InventoryReport: React.FC<InventoryReportProps> = ({ 
   businessLineId,
   initialDate = new Date()
@@ -105,6 +154,8 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
   const [lowStockItems, setLowStockItems] = useState<number>(0);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [productSort, setProductSort] = useState<SortState<ProductSortKey>>(null);
+  const [movementSort, setMovementSort] = useState<SortState<MovementSortKey>>(null);
   const [monthYearDialogOpen, setMonthYearDialogOpen] = useState(false);
   const [yearDialogOpen, setYearDialogOpen] = useState(false);
   const [downloadingMonthly, setDownloadingMonthly] = useState(false);
@@ -986,6 +1037,52 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
     return movement.ReferenceID || '-';
   };
 
+  const toggleProductSort = (key: ProductSortKey) =>
+    setProductSort((prev) => (prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  const toggleMovementSort = (key: MovementSortKey) =>
+    setMovementSort((prev) => (prev?.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+
+  const productStatus = (p: Product) =>
+    p.Status ?? (p.CurrentQTY === 0 ? 'Out of Stock' : p.CurrentQTY < (p.MinimumQTY || 0) ? 'Low Stock' : 'In Stock');
+
+  const sortedProducts = productSort
+    ? sortRows(filteredProducts, (p) => {
+        switch (productSort.key) {
+          case 'id': return p.ProductID;
+          case 'name': return p.Name;
+          case 'qty': return p.CurrentQTY;
+          case 'minQty': return p.MinimumQTY || 0;
+          case 'profit': return p.Profit ?? null;
+          case 'status': return productStatus(p);
+          case 'value': return p.Value || p.CurrentQTY * (p.LastPurchasePrice || p.AverageCost || 0);
+          case 'updated': return p.LastUpdated ? new Date(p.LastUpdated).getTime() : null;
+        }
+      }, productSort.dir)
+    : filteredProducts;
+
+  const movementDetailsText = (m: StockMovement) =>
+    [
+      m.details?.vendor && `Vendor: ${m.details.vendor}`,
+      m.details?.customer && `Customer: ${m.details.customer}`,
+      m.details?.invoiceNumber && `Invoice: ${m.details.invoiceNumber}`,
+      m.Note,
+    ].filter(Boolean).join(' ');
+
+  const sortedMovements = movementSort
+    ? sortRows(movements, (m) => {
+        switch (movementSort.key) {
+          case 'date': return new Date(m.Date).getTime();
+          case 'product': return m.ProductName || products.find((p) => p.ProductID === m.ProductID)?.Name || `Product ID: ${m.ProductID}`;
+          case 'type': return getMovementTypeLabel(m);
+          case 'reference': return getMovementReference(m);
+          case 'quantity': return m.Quantity;
+          case 'direction': return m.Direction;
+          case 'user': return m.CreatedBy;
+          case 'details': return movementDetailsText(m);
+        }
+      }, movementSort.dir)
+    : movements;
+
   return (
     <Card className="w-full shadow-none rounded-tl-none rounded-tr-none border-0">
       <CardContent className='mt-3'>
@@ -1153,14 +1250,14 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>ID</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead className="text-right">Current Qty</TableHead>
-                          <TableHead className="text-right">Min Qty</TableHead>
-                          <TableHead className="text-right">Profit</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Value</TableHead>
-                          <TableHead>Last Updated</TableHead>
+                          <SortHead label="ID" column="id" sort={productSort} onSort={toggleProductSort} />
+                          <SortHead label="Product" column="name" sort={productSort} onSort={toggleProductSort} />
+                          <SortHead label="Current Qty" column="qty" sort={productSort} onSort={toggleProductSort} className="text-right" />
+                          <SortHead label="Min Qty" column="minQty" sort={productSort} onSort={toggleProductSort} className="text-right" />
+                          <SortHead label="Profit" column="profit" sort={productSort} onSort={toggleProductSort} className="text-right" />
+                          <SortHead label="Status" column="status" sort={productSort} onSort={toggleProductSort} />
+                          <SortHead label="Value" column="value" sort={productSort} onSort={toggleProductSort} className="text-right" />
+                          <SortHead label="Last Updated" column="updated" sort={productSort} onSort={toggleProductSort} />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1171,7 +1268,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                             </TableCell>
                           </TableRow>
                         ) : (
-                          filteredProducts.map((product) => (
+                          sortedProducts.map((product) => (
                             <TableRow key={product.ProductID}>
                               <TableCell className="font-mono text-xs">{product.ProductID}</TableCell>
                               <TableCell className="font-medium">{product.Name}</TableCell>
@@ -1357,14 +1454,14 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead>Date & Time</TableHead>
-                          <TableHead>Product</TableHead>
-                          <TableHead>Type</TableHead>
-                          <TableHead>Reference</TableHead>
-                          <TableHead className="text-right">Quantity</TableHead>
-                          <TableHead>Direction</TableHead>
-                          <TableHead>User</TableHead>
-                          <TableHead>Details</TableHead>
+                          <SortHead label="Date & Time" column="date" sort={movementSort} onSort={toggleMovementSort} />
+                          <SortHead label="Product" column="product" sort={movementSort} onSort={toggleMovementSort} />
+                          <SortHead label="Type" column="type" sort={movementSort} onSort={toggleMovementSort} />
+                          <SortHead label="Reference" column="reference" sort={movementSort} onSort={toggleMovementSort} />
+                          <SortHead label="Quantity" column="quantity" sort={movementSort} onSort={toggleMovementSort} className="text-right" />
+                          <SortHead label="Direction" column="direction" sort={movementSort} onSort={toggleMovementSort} />
+                          <SortHead label="User" column="user" sort={movementSort} onSort={toggleMovementSort} />
+                          <SortHead label="Details" column="details" sort={movementSort} onSort={toggleMovementSort} />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1375,7 +1472,7 @@ const InventoryReport: React.FC<InventoryReportProps> = ({
                             </TableCell>
                           </TableRow>
                         ) : (
-                          movements.map((movement) => {
+                          sortedMovements.map((movement) => {
                             const product = products.find(p => p.ProductID === movement.ProductID);
                             return (
                               <TableRow key={movement.MovementID}>
