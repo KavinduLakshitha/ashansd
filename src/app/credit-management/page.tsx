@@ -33,7 +33,8 @@ import { format } from 'date-fns';
 import { AxiosError } from 'axios';
 import { toast } from '@/hooks/use-toast';
 import CustomCreditSettlementDialog from '@/components/CustomCreditSettlement';
-import { Trash2, AlertTriangle } from "lucide-react";
+import CreditBalanceReportDialog from '@/components/CreditBalanceReportDialog';
+import { Trash2, AlertTriangle, FileDown } from "lucide-react";
 import { DatePicker } from '@/components/ui/date-picker';
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -87,6 +88,7 @@ interface PaymentState {
 interface Customer {
   CustomerID: number;
   CustomerName: string;
+  Balance?: number;
 }
 
 interface ConfirmDialogState {
@@ -173,6 +175,28 @@ interface MarkDepositedDialogState {
   bankAccountId: string;
 }
 
+type SettleMethod = 'CASH' | 'BANK_TRANSFER' | 'CHEQUE';
+
+interface SettleCreditDialogState {
+  isOpen: boolean;
+  credit: Credit | null;
+  method: SettleMethod | '';
+  bankAccountId: string;
+  chequeNumber: string;
+  chequeDate: string;
+  chequeBank: string;
+}
+
+const emptySettleCreditDialog: SettleCreditDialogState = {
+  isOpen: false,
+  credit: null,
+  method: '',
+  bankAccountId: '',
+  chequeNumber: '',
+  chequeDate: '',
+  chequeBank: '',
+};
+
 const PaymentManagement = () => {
   const { user, getBusinessLineID } = useAuth();
   const [pendingPayments, setPendingPayments] = useState<PaymentState>({ 
@@ -207,6 +231,9 @@ const PaymentManagement = () => {
   
   const [activeDateFilter, setActiveDateFilter] = useState<'due' | 'sale'>('sale');
   const [customSettlementOpen, setCustomSettlementOpen] = useState(false);
+  const [creditReportOpen, setCreditReportOpen] = useState(false);
+  // Off by default: the dropdown lists every customer until this is switched on
+  const [hideZeroBalance, setHideZeroBalance] = useState(false);
 
   const pendingCreditRows = useMemo(
     () =>
@@ -279,6 +306,9 @@ const PaymentManagement = () => {
     title: '',
     description: ''
   });
+
+  const [settleCreditDialog, setSettleCreditDialog] = useState<SettleCreditDialogState>(emptySettleCreditDialog);
+  const [settlingCredit, setSettlingCredit] = useState(false);
 
   const [markDepositedDialog, setMarkDepositedDialog] = useState<MarkDepositedDialogState>({
     isOpen: false,
@@ -390,9 +420,22 @@ const PaymentManagement = () => {
   // }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, getBusinessLineID]);
   }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, dateFilterMode, upToDate, saleUpToDate, dueOnDate, saleOnDate, getBusinessLineID]);
     
+  // Reload customers (and their balances) on first load and after any settle/realize/delete
   useEffect(() => {
     fetchCustomers();
-  }, [fetchCustomers]);
+  }, [fetchCustomers, pendingPayments]);
+
+  const dropdownCustomers = useMemo(
+    () =>
+      hideZeroBalance
+        ? customers.filter(
+            (customer) =>
+              Math.abs(Number(customer.Balance ?? 0)) >= 0.005 ||
+              customer.CustomerID.toString() === selectedCustomer
+          )
+        : customers,
+    [customers, hideZeroBalance, selectedCustomer]
+  );
 
   useEffect(() => {
     fetchPendingPayments();
@@ -451,15 +494,92 @@ const PaymentManagement = () => {
     });
   };
 
-  // Open confirmation dialog for Settle Credit
+  // Settle Credit: first ask how the customer paid (Cash / Bank / Cheque), then settle
   const confirmSettleCredit = (credit: Credit) => {
-    setConfirmDialog({
+    setSettleCreditDialog({
+      ...emptySettleCreditDialog,
       isOpen: true,
-      type: 'settle',
-      paymentId: credit.CreditPaymentID,
-      title: 'Settle Credit',
-      description: `Are you sure you want to settle this credit for ${credit.CustomerName} with amount Rs. ${Number(credit.Amount).toFixed(2)}?`
+      credit,
+      chequeDate: format(new Date(), 'yyyy-MM-dd'),
     });
+  };
+
+  const closeSettleCreditDialog = () => {
+    if (settlingCredit) return;
+    setSettleCreditDialog(emptySettleCreditDialog);
+  };
+
+  const settleCreditReady = (() => {
+    const { credit, method, bankAccountId, chequeNumber, chequeDate, chequeBank } = settleCreditDialog;
+    if (!credit || !method) return false;
+    if (method === 'BANK_TRANSFER') return Boolean(bankAccountId);
+    if (method === 'CHEQUE') return Boolean(chequeNumber.trim() && chequeDate && chequeBank.trim());
+    return true;
+  })();
+
+  const handleSettleCreditWithMethod = async () => {
+    const { credit, method, bankAccountId, chequeNumber, chequeDate, chequeBank } = settleCreditDialog;
+    if (!credit || !method || !settleCreditReady) return;
+
+    const amount = parseFloat(Number(credit.Amount).toFixed(2));
+    const payload = {
+      amount,
+      paymentMethod: method,
+      settledDate: format(new Date(), 'yyyy-MM-dd'),
+      selectedItems: [
+        { type: 'credit', creditPaymentId: credit.CreditPaymentID, amount },
+      ],
+      ...(method === 'BANK_TRANSFER' && { bankAccountId: Number(bankAccountId) }),
+      ...(method === 'CHEQUE' && {
+        cheques: [
+          {
+            chequeNumber: chequeNumber.trim(),
+            bank: chequeBank.trim(),
+            realizeDate: chequeDate,
+            chequeStage: 'in_hand',
+            amount,
+          },
+        ],
+      }),
+    };
+
+    try {
+      setSettlingCredit(true);
+      setProcessingIds(prev => new Set(prev).add(credit.CreditPaymentID));
+      await axios.post(
+        `${process.env.NEXT_PUBLIC_API_URL}/payments/customer/${credit.CustomerID}/settle-amount`,
+        payload
+      );
+      setSettleCreditDialog(emptySettleCreditDialog);
+      await fetchPendingPayments();
+      toast({
+        title: 'Success',
+        description:
+          method === 'CHEQUE'
+            ? 'Credit settled with a cheque. The cheque is now under pending cheques.'
+            : 'Credit has been settled successfully',
+        duration: 3000,
+      });
+    } catch (err: unknown) {
+      const errorMessage =
+        err instanceof AxiosError
+          ? err.response?.data?.message || 'Error settling credit'
+          : 'Error settling credit';
+      setError(`Error: ${errorMessage}`);
+      toast({
+        variant: 'destructive',
+        title: 'Error',
+        description: errorMessage,
+        duration: 3000,
+      });
+    } finally {
+      setSettlingCredit(false);
+      setProcessingIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(credit.CreditPaymentID);
+        return newSet;
+      });
+    }
   };
 
   // Open confirmation dialog for Delete Cheque Realization
@@ -897,27 +1017,55 @@ const PaymentManagement = () => {
           >
             Custom Credit Settlement
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setCreditReportOpen(true)}
+            className="mr-4 flex items-center gap-2"
+          >
+            <FileDown className="h-4 w-4" />
+            Credit Balance Report
+          </Button>
 
           <div className="flex gap-4">
-            <Select
-              value={selectedCustomer}
-              onValueChange={setSelectedCustomer}
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Select Customer" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Customers</SelectItem>
-                {customers.map((customer) => (
-                  <SelectItem 
-                    key={customer.CustomerID} 
-                    value={customer.CustomerID.toString()}
-                  >
-                    {customer.CustomerName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex flex-col gap-2">
+              <Select
+                value={selectedCustomer}
+                onValueChange={setSelectedCustomer}
+              >
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Select Customer" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Customers</SelectItem>
+                  {dropdownCustomers.map((customer) => (
+                    <SelectItem 
+                      key={customer.CustomerID} 
+                      value={customer.CustomerID.toString()}
+                    >
+                      {customer.CustomerName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={hideZeroBalance}
+                  onClick={() => setHideZeroBalance((prev) => !prev)}
+                  className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
+                    hideZeroBalance ? 'bg-primary' : 'bg-gray-300'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                      hideZeroBalance ? 'translate-x-[18px]' : 'translate-x-0.5'
+                    }`}
+                  />
+                </button>
+                Hide Zero Balance Customers
+              </label>
+            </div>
 
             <div className="flex flex-col gap-2">
               <div className="flex gap-2 items-center">
@@ -1443,6 +1591,98 @@ const PaymentManagement = () => {
       </Card>
 
       {/* Mark Cheque Deposited Dialog */}
+      <Dialog open={settleCreditDialog.isOpen} onOpenChange={(open) => !open && closeSettleCreditDialog()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Settle Credit</DialogTitle>
+            <DialogDescription>
+              {settleCreditDialog.credit
+                ? `${settleCreditDialog.credit.CustomerName} — ${formatCurrency(settleCreditDialog.credit.Amount)}. How did the customer pay?`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div>
+              <Label>Payment method</Label>
+              <Select
+                value={settleCreditDialog.method || undefined}
+                onValueChange={(value) =>
+                  setSettleCreditDialog((prev) => ({ ...prev, method: value as SettleMethod }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select payment method" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="CASH">Cash</SelectItem>
+                  <SelectItem value="BANK_TRANSFER">Bank Account</SelectItem>
+                  <SelectItem value="CHEQUE">Cheque</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {settleCreditDialog.method === 'BANK_TRANSFER' && (
+              <div>
+                <Label>Received in account</Label>
+                <BankAccountSelect
+                  value={settleCreditDialog.bankAccountId}
+                  onChange={(value) =>
+                    setSettleCreditDialog((prev) => ({ ...prev, bankAccountId: value }))
+                  }
+                  placeholder="Select bank account"
+                />
+              </div>
+            )}
+
+            {settleCreditDialog.method === 'CHEQUE' && (
+              <div className="space-y-4">
+                <div>
+                  <Label htmlFor="settle-cheque-number">Cheque No</Label>
+                  <Input
+                    id="settle-cheque-number"
+                    value={settleCreditDialog.chequeNumber}
+                    onChange={(e) =>
+                      setSettleCreditDialog((prev) => ({ ...prev, chequeNumber: e.target.value }))
+                    }
+                    placeholder="Enter cheque number"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="settle-cheque-date">Cheque Date</Label>
+                  <Input
+                    id="settle-cheque-date"
+                    type="date"
+                    value={settleCreditDialog.chequeDate}
+                    onChange={(e) =>
+                      setSettleCreditDialog((prev) => ({ ...prev, chequeDate: e.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="settle-cheque-bank">Bank</Label>
+                  <Input
+                    id="settle-cheque-bank"
+                    value={settleCreditDialog.chequeBank}
+                    onChange={(e) =>
+                      setSettleCreditDialog((prev) => ({ ...prev, chequeBank: e.target.value }))
+                    }
+                    placeholder="Bank on the cheque"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+          <DialogFooter className="mt-4 gap-2">
+            <Button variant="outline" onClick={closeSettleCreditDialog} disabled={settlingCredit}>
+              Cancel
+            </Button>
+            <Button onClick={handleSettleCreditWithMethod} disabled={!settleCreditReady || settlingCredit}>
+              {settlingCredit ? 'Settling...' : 'Settle'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={markDepositedDialog.isOpen} onOpenChange={(open) => !open && closeMarkDepositedDialog()}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -1595,6 +1835,12 @@ const PaymentManagement = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <CreditBalanceReportDialog
+        open={creditReportOpen}
+        onOpenChange={setCreditReportOpen}
+        customers={customers}
+      />
 
       <CustomCreditSettlementDialog
         open={customSettlementOpen}
