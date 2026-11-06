@@ -34,7 +34,9 @@ import { AxiosError } from 'axios';
 import { toast } from '@/hooks/use-toast';
 import CustomCreditSettlementDialog from '@/components/CustomCreditSettlement';
 import CreditBalanceReportDialog from '@/components/CreditBalanceReportDialog';
-import { Trash2, AlertTriangle, FileDown } from "lucide-react";
+import { Trash2, AlertTriangle, FileDown, ChevronDown } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
 import { DatePicker } from '@/components/ui/date-picker';
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -199,7 +201,8 @@ const emptySettleCreditDialog: SettleCreditDialogState = {
 
 const PaymentManagement = () => {
   const { user, getBusinessLineID } = useAuth();
-  const [pendingPayments, setPendingPayments] = useState<PaymentState>({ 
+  // Everything the server returned; `pendingPayments` below is this filtered by the selected customers
+  const [allPendingPayments, setPendingPayments] = useState<PaymentState>({ 
     pendingCheques: [], 
     pendingCredits: [],
     pendingOpeningBalances: [],
@@ -210,8 +213,26 @@ const PaymentManagement = () => {
   const [error, setError] = useState('');
   const [processingIds, setProcessingIds] = useState<Set<string | number>>(new Set());
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [selectedCustomer, setSelectedCustomer] = useState<string>("all");
+  // Multi-select customer filter. Empty = all customers.
+  const [selectedCustomers, setSelectedCustomers] = useState<number[]>([]);
   const [customerOutstanding, setCustomerOutstanding] = useState<number | null>(null);
+  const [customerFilterOpen, setCustomerFilterOpen] = useState(false);
+  const [customerSearch, setCustomerSearch] = useState('');
+  // Outstanding per customer (credits + cheques + opening balances, no date filter); loaded when Hide Zero Balance is on
+  const [customerBalances, setCustomerBalances] = useState<Map<number, number> | null>(null);
+
+  const pendingPayments = useMemo<PaymentState>(() => {
+    if (selectedCustomers.length === 0) return allPendingPayments;
+    const wanted = new Set(selectedCustomers);
+    const keep = <T extends { CustomerID: number }>(rows: T[]) => rows.filter((row) => wanted.has(Number(row.CustomerID)));
+    return {
+      pendingCheques: keep(allPendingPayments.pendingCheques),
+      pendingCredits: keep(allPendingPayments.pendingCredits),
+      pendingOpeningBalances: keep(allPendingPayments.pendingOpeningBalances),
+      realizedCheques: keep(allPendingPayments.realizedCheques),
+      settledCredits: keep(allPendingPayments.settledCredits),
+    };
+  }, [allPendingPayments, selectedCustomers]);
   
   const [dateFilterMode, setDateFilterMode] = useState<'range' | 'upTo' | 'on'>('range');
   const [upToDate, setUpToDate] = useState(new Date());
@@ -334,8 +355,9 @@ const PaymentManagement = () => {
       const businessLineId = getBusinessLineID();
       
       const params = new URLSearchParams();
-      if (selectedCustomer && selectedCustomer !== "all") {
-          params.append('customerId', selectedCustomer);
+      // One customer: let the server filter. Several: load all and filter on the page.
+      if (selectedCustomers.length === 1) {
+          params.append('customerId', String(selectedCustomers[0]));
       }
       
       // const dateRange = activeDateFilter === 'due' ? dueDateRange : saleDateRange;
@@ -418,49 +440,104 @@ const PaymentManagement = () => {
       setLoading(false);
     }
   // }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, getBusinessLineID]);
-  }, [selectedCustomer, dueDateRange, saleDateRange, activeDateFilter, dateFilterMode, upToDate, saleUpToDate, dueOnDate, saleOnDate, getBusinessLineID]);
+  }, [selectedCustomers, dueDateRange, saleDateRange, activeDateFilter, dateFilterMode, upToDate, saleUpToDate, dueOnDate, saleOnDate, getBusinessLineID]);
     
   // Reload customers (and their balances) on first load and after any settle/realize/delete
   useEffect(() => {
     fetchCustomers();
   }, [fetchCustomers, pendingPayments]);
 
-  const dropdownCustomers = useMemo(
-    () =>
-      hideZeroBalance
-        ? customers.filter(
-            (customer) =>
-              Math.abs(Number(customer.Balance ?? 0)) >= 0.005 ||
-              customer.CustomerID.toString() === selectedCustomer
-          )
-        : customers,
-    [customers, hideZeroBalance, selectedCustomer]
-  );
+  // Balances for Hide Zero Balance. Worked out here from all pending items (ignoring the date
+  // filters), so it doesn't depend on the customer list endpoint returning a balance.
+  useEffect(() => {
+    if (!hideZeroBalance) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const businessLineId = getBusinessLineID();
+        const response = await axios.get(`${process.env.NEXT_PUBLIC_API_URL}/payments/pending/${businessLineId}`);
+        const balances = new Map<number, number>();
+        const add = (rows: { CustomerID: number; Amount: number | string }[] = []) => {
+          rows.forEach((row) => {
+            const id = Number(row.CustomerID);
+            balances.set(id, (balances.get(id) ?? 0) + (Number(row.Amount) || 0));
+          });
+        };
+        add(response.data.pendingCredits);
+        add(response.data.pendingCheques);
+        add(response.data.pendingOpeningBalances);
+        if (!cancelled) setCustomerBalances(balances);
+      } catch (err) {
+        console.error('Error loading customer balances:', err);
+        // On failure show everyone rather than an empty list
+        if (!cancelled) setCustomerBalances(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hideZeroBalance, allPendingPayments, getBusinessLineID]);
+
+  const dropdownCustomers = useMemo(() => {
+    const query = customerSearch.trim().toLowerCase();
+    return customers.filter((customer) => {
+      if (query && !customer.CustomerName.toLowerCase().includes(query)) return false;
+      if (!hideZeroBalance || !customerBalances) return true;
+      // Customers already ticked always stay in the list so they can be unticked
+      if (selectedCustomers.includes(customer.CustomerID)) return true;
+      return Math.abs(customerBalances.get(Number(customer.CustomerID)) ?? 0) >= 0.005;
+    });
+  }, [customers, customerSearch, hideZeroBalance, customerBalances, selectedCustomers]);
+
+  const toggleCustomer = (customerId: number, checked: boolean) => {
+    setSelectedCustomers((prev) =>
+      checked ? (prev.includes(customerId) ? prev : [...prev, customerId]) : prev.filter((id) => id !== customerId)
+    );
+  };
+
+  const selectedCustomerNames = customers
+    .filter((customer) => selectedCustomers.includes(customer.CustomerID))
+    .map((customer) => customer.CustomerName);
+
+  const customerFilterLabel =
+    selectedCustomers.length === 0
+      ? 'All Customers'
+      : selectedCustomers.length === 1
+        ? selectedCustomerNames[0] ?? '1 customer'
+        : `${selectedCustomers.length} customers`;
 
   useEffect(() => {
     fetchPendingPayments();
   }, [fetchPendingPayments]);
 
+  // Total outstanding for the selected customer(s), added up across customers
   useEffect(() => {
+    let cancelled = false;
     const fetchCustomerOutstanding = async () => {
-      if (!selectedCustomer || selectedCustomer === 'all') {
+      if (selectedCustomers.length === 0) {
         setCustomerOutstanding(null);
         return;
       }
 
       try {
-        const response = await axios.get(
-          `${process.env.NEXT_PUBLIC_API_URL}/payments/customer/${selectedCustomer}/outstanding`
+        const results = await Promise.all(
+          selectedCustomers.map((customerId) =>
+            axios.get(`${process.env.NEXT_PUBLIC_API_URL}/payments/customer/${customerId}/outstanding`)
+          )
         );
-        setCustomerOutstanding(Number(response.data.TotalOutstanding || 0));
+        const total = results.reduce((sum, response) => sum + Number(response.data.TotalOutstanding || 0), 0);
+        if (!cancelled) setCustomerOutstanding(total);
       } catch (err) {
         console.error('Error fetching customer outstanding:', err);
-        setCustomerOutstanding(null);
+        if (!cancelled) setCustomerOutstanding(null);
       }
     };
 
     fetchCustomerOutstanding();
-  }, [selectedCustomer, pendingPayments]);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedCustomers, allPendingPayments]);
 
   // Open confirmation dialog for Realize Cheque
   const confirmRealizeCheque = (cheque: Cheque) => {
@@ -1028,25 +1105,61 @@ const PaymentManagement = () => {
 
           <div className="flex gap-4">
             <div className="flex flex-col gap-2">
-              <Select
-                value={selectedCustomer}
-                onValueChange={setSelectedCustomer}
-              >
-                <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="Select Customer" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Customers</SelectItem>
-                  {dropdownCustomers.map((customer) => (
-                    <SelectItem 
-                      key={customer.CustomerID} 
-                      value={customer.CustomerID.toString()}
-                    >
-                      {customer.CustomerName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={customerFilterOpen} onOpenChange={setCustomerFilterOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="w-[220px] justify-between font-normal">
+                    <span className="truncate">{customerFilterLabel}</span>
+                    <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-[280px] p-2">
+                  <Input
+                    placeholder="Search customers..."
+                    value={customerSearch}
+                    onChange={(e) => setCustomerSearch(e.target.value)}
+                    className="mb-2 h-8"
+                  />
+                  <div className="mb-1 flex items-center justify-between px-1 text-xs text-muted-foreground">
+                    <span>{selectedCustomers.length === 0 ? 'Showing all customers' : `${selectedCustomers.length} selected`}</span>
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() =>
+                          setSelectedCustomers((prev) => {
+                            const next = new Set(prev);
+                            dropdownCustomers.forEach((customer) => next.add(customer.CustomerID));
+                            return Array.from(next);
+                          })
+                        }
+                      >
+                        Select shown
+                      </button>
+                      <button type="button" className="underline" onClick={() => setSelectedCustomers([])}>
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    {dropdownCustomers.length === 0 ? (
+                      <div className="py-4 text-center text-sm text-muted-foreground">No customers found</div>
+                    ) : (
+                      dropdownCustomers.map((customer) => (
+                        <label
+                          key={customer.CustomerID}
+                          className="flex cursor-pointer items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-muted"
+                        >
+                          <Checkbox
+                            checked={selectedCustomers.includes(customer.CustomerID)}
+                            onCheckedChange={(checked) => toggleCustomer(customer.CustomerID, checked === true)}
+                          />
+                          <span className="truncate">{customer.CustomerName}</span>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </PopoverContent>
+              </Popover>
               <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
                 <button
                   type="button"
@@ -1251,7 +1364,7 @@ const PaymentManagement = () => {
           </Card>
         </div>
 
-        {selectedCustomer !== 'all' && customerOutstanding !== null && (
+        {selectedCustomers.length > 0 && customerOutstanding !== null && (
           <div className="mx-4 mt-4">
             <Card>
               <CardContent className="pt-6">
@@ -1261,7 +1374,7 @@ const PaymentManagement = () => {
                     <p className="text-2xl font-bold">{formatCurrency(customerOutstanding)}</p>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    {customers.find((customer) => customer.CustomerID.toString() === selectedCustomer)?.CustomerName}
+                    {selectedCustomerNames.join(', ')}
                   </p>
                 </div>
               </CardContent>
